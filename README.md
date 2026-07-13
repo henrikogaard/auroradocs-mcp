@@ -1,208 +1,220 @@
 # AuroraDocs MCP Server
 
-Exposes your AuroraCloud workspace to Claude Desktop and other MCP-compatible AI clients.
+`auroradocs-mcp` connects a local MCP client to one AuroraCloud workspace. It
+runs on your computer over stdio and sends authenticated requests to
+`https://api.auroradocs.eu`.
 
-## Security
+The public package is `auroradocs-mcp`, the executable is `aurora-mcp`, and
+this documentation targets version `0.1.0`.
 
-- On startup, the server verifies that the authenticated user is a **member** of the target workspace. If not, it refuses to start.
-- Every read and write operation is scoped to `AURORA_WORKSPACE_ID` — no cross-workspace or cross-user data leakage.
-- Object lookups verify `workspace_id` before returning data.
-- E2EE-encrypted content is detected and flagged rather than exposing ciphertext.
+## Requirements
 
-### Token requirements (#220)
+- Node.js 20 or newer
+- an AuroraDocs account with an AuroraCloud-backed workspace
+- permission to create an MCP token for that workspace
+- a supported local MCP client: Claude Desktop, Claude Code, Codex, or another
+  client that can start a stdio server
 
-`AURORA_API_TOKEN` must be a workspace MCP token minted via **Settings →
-Workspace → MCP Access** in the AuroraDocs web app. The server hardens these
-tokens as service credentials:
+Browser-only workspaces and Local folders workspaces are not supported. The
+server does not read a browser tab or a folder on your computer.
 
-- **Scopes.** Tokens carry an explicit scope set drawn from six values:
-  `read:objects`, `read:content`, `write:objects`, `write:content`, `tasks`,
-  `search`. There is **no implicit nesting** — a `read:objects` token cannot
-  read content; you need `read:content` separately. New tokens default to
-  read-only.
-- **Expiry.** Tokens default to a 90-day expiry. Only workspace owners and
-  admins can mint a no-expiry token. After expiry, every request returns
-  `401 Invalid MCP token`. Renew by minting a new token and updating
-  `AURORA_API_TOKEN`.
-- **Rate limits.** 300 read requests and 30 write requests per minute per
-  token. Exceeding either bucket returns `429` with a `retry-after` header.
-  Retry after the indicated number of seconds.
-- **Scope errors.** Operations the token's scope set cannot satisfy return
-  `403 MCP token is missing scope <scope-name>`. Add the missing scope by
-  minting a new token with a broader scope set.
-- **Role gating.** A `viewer`-role member's token can never perform write
-  operations even if it carries a write scope; the server returns `403 MCP
-  token role cannot perform write operations`.
-- **Revocation.** Tokens can be revoked individually, in workspace-wide bulk,
-  or automatically when the minting user is removed from the workspace.
-  Revoked tokens fail with `401 Invalid MCP token` immediately.
-- **Audit.** Every authenticated request and every denial is recorded in the
-  workspace's MCP Access activity drawer, including IP, user-agent, route,
-  scope checked, and denial reason. Raw token values are never logged.
+## Create an MCP key
 
-### Transport decision (#491)
+1. Sign in to AuroraDocs and open the AuroraCloud workspace you want to use.
+2. Go to **Settings → Workspace → MCP Access**.
+3. Enter a label that identifies the client, such as `Personal laptop — Codex`.
+4. Select the minimum scopes the client needs. Start with `read:objects`; add
+   `read:content` only when the client must read document bodies.
+5. Choose a bounded expiry: 30, 60, 90, 180, or 365 days. The default is
+   **90 days**. Prefer a bounded expiry even if your role offers a no-expiry
+   option.
+6. Select **Create token**.
+7. Copy the raw `aur_mcp_` token immediately. It is **shown only once** and
+   cannot be recovered later. Store it in the local client configuration or a
+   trusted secret manager; never paste it into an issue, pull request, chat, or
+   screenshot.
+8. Copy the workspace ID from the configuration snippet on the same MCP Access
+   page. You will use it as `AURORA_WORKSPACE_ID`.
 
-AuroraDocs currently supports MCP through the local stdio server only. There is
-no hosted HTTP, SSE, or OAuth MCP endpoint. Keep `aur_mcp_...` tokens in a local
-MCP client configuration and do not expose the stdio server as a network
-service.
+Only workspace owners and admins can create tokens. A token is a
+workspace-scoped service credential, not an account-wide API key.
 
-Remote MCP transport is deferred by
-[`ADR 37`](../../docs/decisions/adr-37-mcp-remote-transport.md) until
-AuroraDocs has a separate threat model, client trust model,
-consent/revocation UX, distributed rate limits, per-client audit semantics, and
-operator kill switch for that surface.
+### Choose least-privilege scopes
 
-### Recommended renewal workflow
+Scopes are independent: `read:objects` does not include `read:content`, and a
+write scope does not imply its read counterpart.
 
-1. Watch the activity drawer for an `expired_denied` event or check the
-   expiry date in **Settings → Workspace → MCP Access** at least a week
-   before expiry.
-2. Mint a new token with the same label and scopes (the UI prefills neither;
-   re-pick the scopes intentionally).
-3. Update the `AURORA_API_TOKEN` env var in your client config (for Claude
-   Desktop, edit `claude_desktop_config.json` and restart).
-4. Revoke the old token from the MCP Access UI once the new one is verified
-   working.
+| Goal | Start with these scopes |
+| --- | --- |
+| Confirm the connection and list titles | `read:objects` |
+| Read page or Canvas content | `read:objects`, `read:content` |
+| Search and read workspace knowledge | `read:objects`, `read:content`, `search` |
+| Review tasks and week planning | `read:objects`, `tasks` |
+| Update task metadata after confirmation | `read:objects`, `tasks`, `write:objects` |
+| Create or rename non-task objects | `read:objects`, `write:objects` |
+| Replace or append document content | `read:objects`, `read:content`, `write:content` |
 
-## Setup
+`read:objects` is the practical baseline because the server verifies workspace
+membership at startup and most tools operate on object metadata. Add
+`write:objects` or `write:content` only when you intend to let the client modify
+the workspace. See the complete [scope and tool reference](docs/tools.md).
 
-### 1. Install dependencies
+## Configure a client
 
-```bash
-pnpm install
-pnpm build
-```
+All examples below use the production AuroraCloud API and pin package version
+`0.1.0`. Replace `WORKSPACE_ID` and `REDACTED` locally. Do not commit the
+resulting configuration.
 
-### 2. Configure Claude Desktop
+The server requires exactly these environment variables:
 
-The MCP server runs against AuroraCloud.
+| Variable | Value |
+| --- | --- |
+| `AURORA_API_URL` | `https://api.auroradocs.eu` |
+| `AURORA_WORKSPACE_ID` | the workspace ID shown on the MCP Access page |
+| `AURORA_API_TOKEN` | the one-time `aur_mcp_` token |
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Do not configure an AuroraDocs email or password. Public onboarding supports
+MCP-token authentication only.
+
+### Claude Desktop
+
+Open Claude Desktop's developer settings and edit its MCP configuration. Add
+this server under `mcpServers`, preserving any servers already present:
 
 ```json
 {
   "mcpServers": {
-    "aurora": {
-      "command": "node",
-      "args": ["/path/to/AuroraDocs/packages/mcp-server/dist/index.js"],
+    "auroradocs": {
+      "command": "npx",
+      "args": ["-y", "auroradocs-mcp@0.1.0"],
       "env": {
-        "AURORA_API_URL": "http://127.0.0.1:3000",
-        "AURORA_WORKSPACE_ID": "your-workspace-id",
-        "AURORA_API_TOKEN": "aur_mcp_your_workspace_token"
+        "AURORA_API_URL": "https://api.auroradocs.eu",
+        "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
+        "AURORA_API_TOKEN": "REDACTED"
       }
     }
   }
 }
 ```
 
-Restart Claude Desktop after saving.
+Save the file and restart Claude Desktop. Anthropic's current
+[local MCP server guide](https://support.anthropic.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop)
+describes how to reach the configuration screen.
 
-### Authentication
+### Claude Code
 
-- Recommended:
-  - `AURORA_API_TOKEN` using a workspace MCP token (`aur_mcp_...`) minted from Workspace Settings.
-- Legacy/dev fallback:
-  - `AURORA_API_EMAIL` + `AURORA_API_PASSWORD`
-- `AURORA_API_URL` must point at the AuroraCloud API.
-
-### Local AuroraCloud smoke
-
-With the local AuroraCloud API available, run:
+Current Claude Code accepts local stdio servers through `claude mcp add`.
+Options must appear before the server name:
 
 ```bash
-pnpm --filter @aurora/mcp-server auroracloud-smoke
+claude mcp add --transport stdio --scope user \
+  --env AURORA_API_URL=https://api.auroradocs.eu \
+  --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
+  --env AURORA_API_TOKEN=REDACTED \
+  auroradocs -- npx -y auroradocs-mcp@0.1.0
 ```
 
-This verifies:
-- authentication against AuroraCloud
-- workspace membership validation
-- object creation
-- content updates
-- property updates
-- object reload/list behavior through the MCP tool layer
+Run `claude mcp get auroradocs` to inspect the saved entry, then use `/mcp` in
+Claude Code to check its connection. See Anthropic's current
+[Claude Code MCP documentation](https://code.claude.com/docs/en/mcp).
 
-### Live AuroraCloud smoke
+### Codex
 
-With a real AuroraCloud workspace and credentials available, run:
+The installed Codex CLI accepts `--env` for local stdio servers:
 
 ```bash
-AURORA_API_URL=https://api.auroradocs.eu \
-AURORA_WORKSPACE_ID=your-workspace-id \
-AURORA_API_TOKEN=aur_mcp_your_workspace_token \
-pnpm --filter @aurora/mcp-server auroracloud-live-smoke
+codex mcp add \
+  --env AURORA_API_URL=https://api.auroradocs.eu \
+  --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
+  --env AURORA_API_TOKEN=REDACTED \
+  auroradocs -- npx -y auroradocs-mcp@0.1.0
 ```
 
-This verifies the production MCP path against AuroraCloud by:
-- authenticating with the live backend token
-- validating workspace membership
-- listing task lists and members
-- creating a temporary page
-- writing and reloading content
-- deleting the temporary page again
+Run `codex mcp get auroradocs` to inspect the saved entry.
 
-## Available Tools
+### Other stdio clients
 
-| Tool | Description |
-|------|-------------|
-| `search_objects` | Search for pages, notes, tasks by title keyword |
-| `search` | Alias for `search_objects` |
-| `list_objects` | List objects, optionally filtered by type |
-| `list_recent` | List recently updated objects, optionally filtered by type |
-| `wiki_search` | Search workspace knowledge and return citation-ready sources |
-| `wiki_get_page` | Read a wiki source directly, with optional full text |
-| `wiki_related` | Find related workspace sources for an object |
-| `wiki_recent` | List recently updated readable workspace sources |
-| `get_object` | Get full content, details, and properties of an object |
-| `list_workspace_members` | List workspace members with roles |
-| `list_task_lists` | List available task lists |
-| `list_task_statuses` | List available task statuses |
-| `get_mcp_tool_coverage` | Return implemented MCP coverage areas plus prioritized gaps |
-| `get_mcp_workflow_recipes` | Return documented agent workflow recipes and the tools/scopes they use |
-| `list_week_plan` | Return the Monday-start Week Planning view for an anchor date |
-| `read_canvas` | Read Canvas cards, edges, references, frames, and warnings without modifying the canvas |
-| `schedule_task_block` | Schedule an existing task or create a task-backed time block |
-| `create_object` | Create a new page, note, etc. |
-| `create_task` | Create a task with status, priority, assignees, labels, etc. |
-| `update_task` | Update task fields (status, priority, assignees, etc.) |
-| `update_object_title` | Rename an object |
-| `update_object` | Rename an object and/or replace its plain-text content |
-| `set_content` | Set the text content of an object |
-| `append_block` | Append plain-text paragraphs to an object |
-| `set_property` | Set a generic property value on an object |
-| `delete_object` | Soft-delete an object (reversible) |
-
-### Week Planning
-
-Use `list_week_plan` to inspect the current planning week:
+Use this valid generic JSON shape when a client accepts an MCP server object:
 
 ```json
-{ "anchor_date": "2026-07-09", "include_unscheduled": true, "unscheduled_limit": 12 }
+{
+  "command": "npx",
+  "args": ["-y", "auroradocs-mcp@0.1.0"],
+  "env": {
+    "AURORA_API_URL": "https://api.auroradocs.eu",
+    "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
+    "AURORA_API_TOKEN": "REDACTED"
+  }
+}
 ```
 
-### Canvas
+The client must launch the process locally and communicate over stdio. Do not
+configure `https://api.auroradocs.eu` as an MCP HTTP/SSE URL; it is the API the
+local server calls, not a hosted MCP endpoint.
 
-Use `read_canvas` to inspect cards and links in a Canvas object:
+## Verify read-only access first
 
-```json
-{ "id": "canvas_object_id", "include_text": true }
+1. Mint a token with only `read:objects`.
+2. Start or restart the client.
+3. Ask the client to call `list_objects` with a small limit and return only
+   object titles and IDs.
+4. Confirm that the result belongs to the intended workspace.
+5. Only then mint a replacement token with any additional scopes your workflow
+   genuinely needs. Update the client, verify it, and revoke the first token.
+
+If the connection fails, see [Troubleshooting](docs/troubleshooting.md). Never
+paste the raw token into logs or bug reports.
+
+## Manage and revoke access
+
+Return to **Settings → Workspace → MCP Access** to manage credentials.
+
+- Review each token's fingerprint, scopes, expiry, last-used time, status, and
+  activity.
+- Open a token's activity view to review allowed requests and denials.
+- Revoke one token when a client is retired, a device is lost, or a replacement
+  token is working.
+- Use **Revoke all active tokens** for a suspected leak or other emergency,
+  then create fresh least-privilege tokens for trusted clients.
+
+Revocation is immediate. To renew access, create a new token before the old one
+expires, update the local client, verify a read-only request, and then revoke
+the old token. Tokens cannot be extended or recovered.
+
+## Security model
+
+- The MCP protocol process is local and stdio-only; AuroraDocs does not provide
+  a hosted MCP HTTP, SSE, or OAuth endpoint.
+- AuroraCloud checks workspace membership, token scopes, the member's current
+  role, expiry, revocation, rate limits, and audit events on requests.
+- E2EE content that is locked or unavailable is reported that way. The server
+  does not return encrypted ciphertext as readable content.
+- The package sends no product telemetry. Network requests are the AuroraCloud
+  API calls required by the selected tools.
+
+Read [Security boundaries](docs/security.md) before granting write scopes. To
+report a vulnerability, follow [SECURITY.md](SECURITY.md).
+
+## Reference
+
+- [Tools and scopes](docs/tools.md)
+- [Security boundaries](docs/security.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Contributing](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+
+## Development
+
+```bash
+pnpm install --frozen-lockfile
+pnpm test
+pnpm check
 ```
 
-### Scheduling
+The live AuroraCloud smoke test is intentionally separate because it requires a
+real test workspace and creates then removes a temporary page. See
+[CONTRIBUTING.md](CONTRIBUTING.md) before using it.
 
-Use `schedule_task_block` only when the user has explicitly asked the agent to schedule work:
+## License
 
-```json
-{ "mode": "schedule_existing_task", "task_id": "task_object_id", "date": "2026-07-10", "start_time": "09:00" }
-```
-
-## Notes
-
-- **E2EE workspaces**: Objects with end-to-end encryption are detected — the server indicates content is encrypted rather than exposing ciphertext.
-- **Workspace modes**: The MCP server only connects to AuroraCloud-backed workspaces. Browser-only and folder-backed local workspaces are outside the server's scope because they do not expose the same AuroraCloud membership and token model.
-- **Wiki tools**: See [`docs/reference/wiki-mcp-tools.md`](../../docs/reference/wiki-mcp-tools.md) for the implemented `wiki_search`, `wiki_get_page`, `wiki_related`, and `wiki_recent` read-only tool set and its normalized `knowledge_sources` result shape.
-- **Coverage and workflows**: `get_mcp_tool_coverage` lets agents inspect the current MCP coverage/gap audit from the server they are connected to. `get_mcp_workflow_recipes` returns the supported weekly summary, task triage, research synthesis, and source lookup tool recipes with required scopes.
-- **Task fields**: Full task support including assignee resolution by name/email, task list matching by name, status validation, priority normalization.
-- **Soft delete**: `delete_object` marks objects as deleted (trash) — they are not permanently removed.
-- **AuroraCloud task lists**: `list_task_lists` reads live `task_lists` records through AuroraCloud's collection API.
-- **Wiki tool scope**: Wiki tools reuse the normalized knowledge routes from `#236`, return citation-ready sources, and never surface permission-denied items or ciphertext as readable text.
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
