@@ -1,0 +1,70 @@
+name: Bug report
+description: Report a reproducible, non-sensitive AuroraDocs MCP defect
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve AuroraDocs MCP Server. Do not paste MCP tokens, credentials, raw configuration files, workspace IDs, workspace contents, private links, or production user data. Report suspected vulnerabilities privately using SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      placeholder: "For example: 0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client and version
+      placeholder: "For example: Claude Code, version x.y.z"
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Node.js version and operating system
+      placeholder: "For example: Node.js 20.x on macOS"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: Describe the defect without private account or workspace information.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Use synthetic or sanitized example data.
+      placeholder: |
+        1. Configure a local stdio server with redacted values
+        2. Start the client
+        3. Call a named tool with synthetic input
+        4. Observe the sanitized error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional sanitized context
+      description: Optional screenshots or logs must not expose private information or raw configuration files.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed MCP tokens, credentials, workspace IDs, workspace contents, private links, and production user data.
+          required: true
+        - label: This is not a private security report.
+          required: true

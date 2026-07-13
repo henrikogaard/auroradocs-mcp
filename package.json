@@ -1,17 +1,43 @@
 {
-  "name": "@aurora/mcp-server",
-  "version": "0.1.1",
-  "private": true,
+  "name": "auroradocs-mcp",
+  "version": "0.1.0",
+  "private": false,
   "type": "module",
   "description": "AuroraCloud-first MCP server that exposes AuroraDocs workspace data to Claude Desktop and other AI agents",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/henrikogaard/auroradocs-mcp.git"
+  },
+  "homepage": "https://github.com/henrikogaard/auroradocs-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/henrikogaard/auroradocs-mcp/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "bin": {
     "aurora-mcp": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "test": "tsx --test src/*.test.ts",
+    "test:live-smoke-contract": "node --import tsx --test scripts/auroracloudLiveSmoke.test.mjs",
+    "test:docs": "node --test scripts/docsContract.test.mjs",
+    "test:contracts": "node --test scripts/checkWiring.test.mjs scripts/packageContentsCore.test.mjs",
+    "test:stdio": "pnpm build && tsx --test test/stdio.integration.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "pnpm test && pnpm test:live-smoke-contract && pnpm test:docs && pnpm test:contracts && pnpm typecheck && pnpm test:stdio && node scripts/packageContents.test.mjs",
+    "prepack": "pnpm build",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "auroracloud-smoke": "tsx scripts/auroracloudSmoke.ts",
     "auroracloud-live-smoke": "tsx scripts/auroracloudLiveSmoke.ts"
   },
   "dependencies": {

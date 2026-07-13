@@ -664,17 +664,7 @@ export function formatToolResult(result: ToolResult): string {
         return lines.join('\n')
       }).join('\n\n')
     case 'mcp_tool_coverage':
-      return result.audit.areas.map((area) => {
-        const lines = [
-          `## ${area.label} (${area.status})`,
-          area.implementedTools.length ? `Implemented: ${area.implementedTools.join(', ')}` : 'Implemented: none',
-        ]
-        if (area.missingTools.length) {
-          lines.push('Missing:')
-          lines.push(...area.missingTools.map((tool) => `- [${tool.priority}] ${tool.name}: ${tool.reason}`))
-        }
-        return lines.join('\n')
-      }).join('\n\n')
+      return JSON.stringify(result.audit, null, 2)
     case 'mcp_workflow_recipes':
       return result.recipes.map((recipe) => [
         `## ${recipe.id}: ${recipe.title}`,
