@@ -28,8 +28,9 @@
   },
   "scripts": {
     "test": "tsx --test src/*.test.ts",
+    "test:stdio": "pnpm build && tsx --test test/stdio.integration.test.ts",
     "build": "tsc -p tsconfig.build.json",
-    "check": "pnpm test && pnpm build && node scripts/packageContents.test.mjs",
+    "check": "pnpm test && pnpm test:stdio && node scripts/packageContents.test.mjs",
     "prepack": "pnpm build",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
