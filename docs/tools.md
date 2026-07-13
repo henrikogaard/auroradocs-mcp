@@ -18,6 +18,11 @@ Scopes do not imply one another. AuroraCloud also enforces current workspace
 membership and role. A viewer cannot write even if a token carries a write
 scope.
 
+`search_objects` and its `search` alias search object titles with `read:objects` only.
+`wiki_search` searches workspace knowledge and requires `read:objects` plus `search`.
+Use `read:content` as well when the workflow will open matching pages or read
+their full text.
+
 ## Tool reference
 
 The scope column lists the practical minimum for the tool's complete operation,
@@ -30,7 +35,7 @@ including object lookup and startup membership verification.
 | `list_objects` | List object metadata, optionally by type. | `read:objects` |
 | `list_recent` | List recently updated objects. | `read:objects` |
 | `wiki_search` | Search workspace knowledge and return source records. | `read:objects`, `read:content`, `search` |
-| `wiki_get_page` | Read one source; optionally include full text. | `read:objects`; add `read:content` for full text |
+| `wiki_get_page` | Read one source; the client can omit full text from its result. | `read:objects`, `read:content` |
 | `wiki_related` | Find sources related to an object. | `read:objects`, `search` |
 | `wiki_recent` | List recently updated readable sources. | `read:objects` |
 | `get_object` | Return one object's metadata, properties, and readable content. | `read:objects`, `read:content` |

@@ -59,6 +59,11 @@ membership at startup and most tools operate on object metadata. Add
 `write:objects` or `write:content` only when you intend to let the client modify
 the workspace. See the complete [scope and tool reference](docs/tools.md).
 
+`search_objects` and its `search` alias search object titles with `read:objects` only.
+`wiki_search` searches workspace knowledge and requires `read:objects` plus `search`.
+Add `read:content` when the workflow will open and read the matching pages, as
+in the knowledge-search recipe above.
+
 ## Configure a client
 
 All examples below use the production AuroraCloud API and pin package version
@@ -174,8 +179,10 @@ Return to **Settings → Workspace → MCP Access** to manage credentials.
 - Open a token's activity view to review allowed requests and denials.
 - Revoke one token when a client is retired, a device is lost, or a replacement
   token is working.
-- Use **Revoke all active tokens** for a suspected leak or other emergency,
-  then create fresh least-privilege tokens for trusted clients.
+- Only workspace owners can use **Revoke all active tokens** in the UI.
+- Admins should revoke each affected token individually and contact a workspace owner for emergency bulk revocation.
+- After emergency revocation, create fresh least-privilege tokens only for
+  trusted clients.
 
 Revocation is immediate. To renew access, create a new token before the old one
 expires, update the local client, verify a read-only request, and then revoke

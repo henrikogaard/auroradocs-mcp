@@ -70,11 +70,12 @@ review that client's data handling before granting access.
 For a suspected token leak:
 
 1. Open **Settings → Workspace → MCP Access**.
-2. Use **Revoke all active tokens** if the affected credential is uncertain;
-   otherwise revoke the identified token.
-3. Review token activity and the last-used timestamp.
-4. Remove the token from the client configuration.
-5. Create a new least-privilege, bounded-expiry token only after the client and
+2. Revoke the identified affected token immediately. Only workspace owners can
+   use **Revoke all active tokens** in the UI.
+3. Admins should revoke each affected token individually and contact a workspace owner for emergency bulk revocation.
+4. Review token activity and the last-used timestamp.
+5. Remove the token from the client configuration.
+6. Create a new least-privilege, bounded-expiry token only after the client and
    device are trusted.
 
 Report vulnerabilities privately as described in [SECURITY.md](../SECURITY.md).

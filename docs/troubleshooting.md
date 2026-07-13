@@ -44,6 +44,14 @@ grant more scopes to work around it; scopes do not provide encryption keys.
 After the server connects, call `list_objects` with a small limit using a
 `read:objects`-only token. Verify the workspace before granting more access.
 
+## Emergency revocation by role
+
+Revoke an identified affected token individually as soon as possible. Only
+workspace owners can use **Revoke all active tokens** in the UI. Admins should
+revoke each affected token individually and contact a workspace owner for
+emergency bulk revocation. Do not wait for a bulk action before removing a
+known compromised token from the client configuration.
+
 ## Reporting a non-sensitive bug
 
 Use the repository bug template. Include the package version, Node.js version,

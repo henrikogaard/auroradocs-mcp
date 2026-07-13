@@ -30,3 +30,22 @@ test('README documents complete public MCP onboarding', async () => {
     assert.ok(readme.includes(text), `README is missing required text: ${text}`)
   }
 })
+
+test('public docs distinguish search scopes and role-specific emergency revocation', async () => {
+  const [readme, tools, security, troubleshooting] = await Promise.all([
+    readFile(new URL('../README.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/tools.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/security.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/troubleshooting.md', import.meta.url), 'utf8'),
+  ])
+  const docs = [readme, tools, security, troubleshooting].join('\n')
+
+  for (const text of [
+    '`search_objects` and its `search` alias search object titles with `read:objects` only.',
+    '`wiki_search` searches workspace knowledge and requires `read:objects` plus `search`.',
+    'Only workspace owners can use **Revoke all active tokens** in the UI.',
+    'Admins should revoke each affected token individually and contact a workspace owner for emergency bulk revocation.',
+  ]) {
+    assert.ok(docs.includes(text), `Public docs are missing required security guidance: ${text}`)
+  }
+})
