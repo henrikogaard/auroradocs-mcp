@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   executeReadOnlyTool,
   runLiveSmoke,
-} from './auroracloudLiveSmokeCore.ts'
+} from './auroracloudLiveSmokeCore.js'
 
 const validEnv = {
   AURORA_API_URL: 'https://api.example.test',

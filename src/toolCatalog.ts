@@ -376,6 +376,10 @@ export function getToolEffect(name: string): McpToolEffect | undefined {
   return TOOL_EFFECTS[name]
 }
 
+export function getToolEffects(): Readonly<Record<string, McpToolEffect>> {
+  return { ...TOOL_EFFECTS }
+}
+
 export function getMcpToolCoverageAudit(): McpToolCoverageAudit {
   return {
     generatedAt: '2026-07-08',

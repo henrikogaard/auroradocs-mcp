@@ -76,3 +76,32 @@ test('public docs distinguish search scopes and role-specific emergency revocati
     )
   }
 })
+
+test('publication audit contains only public-safe repository context', async () => {
+  const audit = await readFile(new URL('../PUBLICATION_AUDIT.md', import.meta.url), 'utf8')
+  const forbiddenPatterns = [
+    ['/Users path', /\/Users\//],
+    ['/tmp path', /\/tmp\//],
+    ['raw personal email', /henrik@ogard\.no/i],
+    ['private source issue identifier', /auroradocs#\d+/i],
+    ['private source repository link', /github\.com\/henrikogaard\/auroradocs(?:\/|#|$)/i],
+    ['project or GraphQL operator details', /(?:Project\s+\d+|GraphQL|quota)/i],
+    ['quarantine implementation details', /(?:quarantin|remote tracking refs|refs\/heads)/i],
+  ]
+
+  for (const [label, pattern] of forbiddenPatterns) {
+    assert.doesNotMatch(audit, pattern, `PUBLICATION_AUDIT.md exposes ${label}`)
+  }
+
+  for (const requiredText of [
+    'clean attributed snapshot',
+    '2026-07-13',
+    'private AuroraDocs source',
+    'failed closed',
+    'gitleaks',
+    'no secrets or private data',
+    'GitHub noreply identity',
+  ]) {
+    assert.ok(audit.includes(requiredText), `PUBLICATION_AUDIT.md is missing: ${requiredText}`)
+  }
+})

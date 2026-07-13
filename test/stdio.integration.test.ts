@@ -83,8 +83,17 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
 
     const result = await client.callTool({ name: 'get_mcp_tool_coverage', arguments: {} })
     assert.notEqual(result.isError, true)
-    const text = result.content.find((item) => item.type === 'text')
-    assert(text && text.type === 'text')
+    const content = result.content
+    assert(Array.isArray(content))
+    const text = content.find((item: unknown): item is { type: 'text'; text: string } => (
+      typeof item === 'object'
+      && item !== null
+      && 'type' in item
+      && item.type === 'text'
+      && 'text' in item
+      && typeof item.text === 'string'
+    ))
+    assert(text)
     assert.doesNotThrow(() => JSON.parse(text.text))
 
     assert.deepEqual(requests.map(({ path }) => path), [

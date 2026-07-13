@@ -1,4 +1,4 @@
-import { runLiveSmoke } from './auroracloudLiveSmokeCore.ts'
+import { runLiveSmoke } from './auroracloudLiveSmokeCore.js'
 
 runLiveSmoke().catch((error) => {
   console.error(error)

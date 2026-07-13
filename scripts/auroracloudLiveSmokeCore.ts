@@ -96,9 +96,9 @@ function requireMcpToken(env: NodeJS.ProcessEnv | Record<string, string | undefi
 
 async function loadRuntimeDependencies(): Promise<LiveSmokeDependencies> {
   const [{ authenticate, resetAuroraClientForTests }, { executeToolCall }, { getToolDefinitions, getToolEffect }] = await Promise.all([
-    import('../src/auroraClient.ts'),
-    import('../src/tools.ts'),
-    import('../src/toolCatalog.ts'),
+    import('../src/auroraClient.js'),
+    import('../src/tools.js'),
+    import('../src/toolCatalog.js'),
   ])
 
   return {

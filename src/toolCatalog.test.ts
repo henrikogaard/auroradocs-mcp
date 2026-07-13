@@ -6,6 +6,7 @@ import {
   getMcpToolCoverageAudit,
   getMcpWorkflowRecipes,
   getToolEffect,
+  getToolEffects,
   getToolDefinitions,
 } from './toolCatalog.js'
 import { executeToolCall, formatToolResult } from './tools.js'
@@ -49,13 +50,38 @@ test('MCP catalog tools are registered and formatted as read-only results', asyn
 })
 
 test('MCP tool catalog authoritatively classifies every registered tool effect', () => {
-  const tools = getToolDefinitions()
+  const expected = {
+    search_objects: 'read',
+    search: 'read',
+    list_objects: 'read',
+    list_recent: 'read',
+    wiki_search: 'read',
+    wiki_get_page: 'read',
+    wiki_related: 'read',
+    wiki_recent: 'read',
+    get_object: 'read',
+    list_workspace_members: 'read',
+    list_task_lists: 'read',
+    list_task_statuses: 'read',
+    list_week_plan: 'read',
+    schedule_task_block: 'write',
+    read_canvas: 'read',
+    get_mcp_tool_coverage: 'read',
+    get_mcp_workflow_recipes: 'read',
+    create_object: 'write',
+    create_task: 'write',
+    update_task: 'write',
+    update_object_title: 'write',
+    update_object: 'write',
+    set_content: 'write',
+    append_block: 'write',
+    set_property: 'write',
+    delete_object: 'write',
+  } as const
+  const toolNames = getToolDefinitions().map((tool) => tool.name).sort()
 
-  assert.ok(tools.every((tool) => getToolEffect(tool.name) === 'read' || getToolEffect(tool.name) === 'write'))
-  assert.equal(getToolEffect('list_objects'), 'read')
-  assert.equal(getToolEffect('wiki_recent'), 'read')
-  assert.equal(getToolEffect('create_object'), 'write')
-  assert.equal(getToolEffect('schedule_task_block'), 'write')
+  assert.deepEqual(getToolEffects(), expected)
+  assert.deepEqual(Object.keys(getToolEffects()).sort(), toolNames)
   assert.equal(getToolEffect('unknown_tool'), undefined)
 })
 
