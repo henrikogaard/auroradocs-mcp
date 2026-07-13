@@ -1,17 +1,38 @@
 {
-  "name": "@aurora/mcp-server",
-  "version": "0.1.1",
-  "private": true,
+  "name": "auroradocs-mcp",
+  "version": "0.1.0",
+  "private": false,
   "type": "module",
   "description": "AuroraCloud-first MCP server that exposes AuroraDocs workspace data to Claude Desktop and other AI agents",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/henrikogaard/auroradocs-mcp.git"
+  },
+  "homepage": "https://github.com/henrikogaard/auroradocs-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/henrikogaard/auroradocs-mcp/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "bin": {
     "aurora-mcp": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "test": "tsx --test src/*.test.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "pnpm test && pnpm build && node scripts/packageContents.test.mjs",
+    "prepack": "pnpm build",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "auroracloud-smoke": "tsx scripts/auroracloudSmoke.ts",
     "auroracloud-live-smoke": "tsx scripts/auroracloudLiveSmoke.ts"
   },
   "dependencies": {

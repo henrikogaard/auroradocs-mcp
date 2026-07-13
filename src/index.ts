@@ -27,6 +27,7 @@ import {
 import { authenticate } from './auroraClient.js'
 import { executeToolCall, formatToolResult } from './tools.js'
 import { getToolDefinitions } from './toolCatalog.js'
+import { SERVER_VERSION } from './version.js'
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ async function main() {
   }
 
   const server = new Server(
-    { name: 'aurora-mcp', version: '0.1.1' },
+    { name: 'auroradocs-mcp', version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   )
 
