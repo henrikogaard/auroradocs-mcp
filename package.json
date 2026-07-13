@@ -24,7 +24,7 @@
     "NOTICE"
   ],
   "bin": {
-    "aurora-mcp": "./dist/index.js"
+    "aurora-mcp": "dist/index.js"
   },
   "scripts": {
     "test": "tsx --test src/*.test.ts",
