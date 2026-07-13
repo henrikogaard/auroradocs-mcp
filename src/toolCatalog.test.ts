@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net'
 import {
   getMcpToolCoverageAudit,
   getMcpWorkflowRecipes,
+  getToolEffect,
   getToolDefinitions,
 } from './toolCatalog.js'
 import { executeToolCall, formatToolResult } from './tools.js'
@@ -45,6 +46,17 @@ test('MCP catalog tools are registered and formatted as read-only results', asyn
   assert.equal(result.type, 'mcp_workflow_recipes')
   assert.match(formatToolResult(result), /weekly_summary/)
   assert.match(formatToolResult(result), /wiki_search/)
+})
+
+test('MCP tool catalog authoritatively classifies every registered tool effect', () => {
+  const tools = getToolDefinitions()
+
+  assert.ok(tools.every((tool) => getToolEffect(tool.name) === 'read' || getToolEffect(tool.name) === 'write'))
+  assert.equal(getToolEffect('list_objects'), 'read')
+  assert.equal(getToolEffect('wiki_recent'), 'read')
+  assert.equal(getToolEffect('create_object'), 'write')
+  assert.equal(getToolEffect('schedule_task_block'), 'write')
+  assert.equal(getToolEffect('unknown_tool'), undefined)
 })
 
 test('read_canvas validates required id before reading workspace content', async () => {

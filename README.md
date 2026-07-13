@@ -219,10 +219,13 @@ pnpm check
 ```
 
 The live AuroraCloud smoke test is intentionally separate because it requires a
-real workspace and a least-privilege `aur_mcp_` token. It only authenticates,
-checks membership, lists tools, members, and task lists, and reads the recent
-knowledge catalog; it does not create, update, or delete workspace data. See
-[CONTRIBUTING.md](CONTRIBUTING.md) before using it.
+real workspace and a least-privilege `aur_mcp_` token. Give the smoke token only
+`read:objects`, `read:content`, and `search`; explicitly omit `tasks` because
+that scope authorizes both task reads and task writes. The smoke authenticates,
+checks membership, lists tools, members, and objects, and reads the recent
+knowledge catalog. Every dispatched tool must carry the catalog's authoritative
+read-only classification, and the smoke never creates, updates, or deletes
+workspace data. See [CONTRIBUTING.md](CONTRIBUTING.md) before using it.
 
 ## License
 

@@ -10,6 +10,7 @@ export type McpToolDefinition = {
 
 export type McpCoveragePriority = 'high' | 'medium' | 'low'
 export type McpCoverageStatus = 'covered' | 'partial' | 'gap'
+export type McpToolEffect = 'read' | 'write'
 
 export type McpToolCoverageAudit = {
   generatedAt: string
@@ -33,6 +34,35 @@ export type McpWorkflowRecipe = {
   requiredScopes: string[]
   toolSteps: string[]
   prompt: string
+}
+
+const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
+  search_objects: 'read',
+  search: 'read',
+  list_objects: 'read',
+  list_recent: 'read',
+  wiki_search: 'read',
+  wiki_get_page: 'read',
+  wiki_related: 'read',
+  wiki_recent: 'read',
+  get_object: 'read',
+  list_workspace_members: 'read',
+  list_task_lists: 'read',
+  list_task_statuses: 'read',
+  list_week_plan: 'read',
+  schedule_task_block: 'write',
+  read_canvas: 'read',
+  get_mcp_tool_coverage: 'read',
+  get_mcp_workflow_recipes: 'read',
+  create_object: 'write',
+  create_task: 'write',
+  update_task: 'write',
+  update_object_title: 'write',
+  update_object: 'write',
+  set_content: 'write',
+  append_block: 'write',
+  set_property: 'write',
+  delete_object: 'write',
 }
 
 const TOOL_DEFINITIONS: McpToolDefinition[] = [
@@ -340,6 +370,10 @@ export function getToolDefinitions(): McpToolDefinition[] {
       required: tool.inputSchema.required ? [...tool.inputSchema.required] : undefined,
     },
   }))
+}
+
+export function getToolEffect(name: string): McpToolEffect | undefined {
+  return TOOL_EFFECTS[name]
 }
 
 export function getMcpToolCoverageAudit(): McpToolCoverageAudit {
