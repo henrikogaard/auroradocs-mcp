@@ -34,7 +34,7 @@ including object lookup and startup membership verification.
 | `search` | Alias for `search_objects`. | `read:objects` |
 | `list_objects` | List object metadata, optionally by type. | `read:objects` |
 | `list_recent` | List recently updated objects. | `read:objects` |
-| `wiki_search` | Search workspace knowledge and return source records. | `read:objects`, `read:content`, `search` |
+| `wiki_search` | Search workspace knowledge and return source records. | `read:objects`, `search` |
 | `wiki_get_page` | Read one source; the client can omit full text from its result. | `read:objects`, `read:content` |
 | `wiki_related` | Find sources related to an object. | `read:objects`, `search` |
 | `wiki_recent` | List recently updated readable sources. | `read:objects` |

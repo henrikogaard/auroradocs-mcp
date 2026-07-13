@@ -48,4 +48,31 @@ test('public docs distinguish search scopes and role-specific emergency revocati
   ]) {
     assert.ok(docs.includes(text), `Public docs are missing required security guidance: ${text}`)
   }
+
+  const wikiSearchRow = tools
+    .split('\n')
+    .find((line) => /^\|\s*`wiki_search`\s*\|/.test(line))
+  assert.ok(wikiSearchRow, 'docs/tools.md is missing the wiki_search table row')
+  assert.match(
+    wikiSearchRow,
+    /^\|\s*`wiki_search`\s*\|[^|]+\|\s*`read:objects`\s*,\s*`search`\s*\|\s*$/,
+    'wiki_search must require exactly read:objects and search',
+  )
+  assert.doesNotMatch(wikiSearchRow, /`read:content`/)
+
+  for (const [name, document] of [
+    ['README.md', readme],
+    ['docs/security.md', security],
+    ['docs/troubleshooting.md', troubleshooting],
+  ]) {
+    const normalized = document.replace(/\s+/g, ' ')
+    assert.ok(
+      normalized.includes('Only workspace owners can use **Revoke all active tokens** in the UI.'),
+      `${name} must identify owner-only UI bulk revocation`,
+    )
+    assert.ok(
+      normalized.includes('Admins should revoke each affected token individually and contact a workspace owner for emergency bulk revocation.'),
+      `${name} must document the admin individual-revoke and owner-escalation path`,
+    )
+  }
 })
