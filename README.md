@@ -219,7 +219,9 @@ pnpm check
 ```
 
 The live AuroraCloud smoke test is intentionally separate because it requires a
-real test workspace and creates then removes a temporary page. See
+real workspace and a least-privilege `aur_mcp_` token. It only authenticates,
+checks membership, lists tools, members, and task lists, and reads the recent
+knowledge catalog; it does not create, update, or delete workspace data. See
 [CONTRIBUTING.md](CONTRIBUTING.md) before using it.
 
 ## License

@@ -38,10 +38,11 @@ tokens, credentials, workspace IDs, workspace contents, private links, or
 production user data.
 
 The `auroracloud-live-smoke` script is optional and intentionally separate. It
-creates and then removes a temporary page in the configured workspace. Run it
-only against a workspace you own and explicitly chose for testing; pass all
-credentials through your local environment and never preserve its raw output in
-the repository.
+requires an `aur_mcp_` token and only authenticates, verifies membership, lists
+tools, members, and task lists, and reads the recent knowledge catalog. It does
+not create, update, or delete workspace data. Run it only against a workspace
+you explicitly chose for testing; pass all credentials through your local
+environment and never preserve its raw output in the repository.
 
 ## Pull requests
 

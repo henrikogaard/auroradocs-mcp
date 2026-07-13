@@ -28,9 +28,10 @@
   },
   "scripts": {
     "test": "tsx --test src/*.test.ts",
+    "test:live-smoke-contract": "node --test scripts/auroracloudLiveSmoke.test.mjs",
     "test:stdio": "pnpm build && tsx --test test/stdio.integration.test.ts",
     "build": "tsc -p tsconfig.build.json",
-    "check": "pnpm test && pnpm test:stdio && node scripts/packageContents.test.mjs",
+    "check": "pnpm test && pnpm test:live-smoke-contract && pnpm test:stdio && node scripts/packageContents.test.mjs",
     "prepack": "pnpm build",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
