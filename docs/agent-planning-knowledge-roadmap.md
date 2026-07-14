@@ -1,12 +1,31 @@
 # Agent Planning and Knowledge Roadmap
 
 Date: 2026-07-14
-Status: Approved direction; implementation pending
+Status: Phase 0 runtime and Phase 1 Resume work implemented; AuroraCloud activation pending
 
 ## Implementation plans
 
 - [MCP runtime reliability and Resume work](superpowers/plans/2026-07-14-mcp-runtime-resume-work.md) — tracked in [issue #9](https://github.com/henrikogaard/auroradocs-mcp/issues/9)
 - [AuroraCloud workspace policy, multi-workspace grants, and project context](https://github.com/henrikogaard/auroradocs/blob/development/docs/superpowers/plans/2026-07-14-mcp-policy-multi-workspace.md)
+
+## Delivery status
+
+The public MCP runtime work is implemented on the branch tracked by
+[issue #9](https://github.com/henrikogaard/auroradocs-mcp/issues/9). This
+includes the delivered Phase 0 runtime reliability work and the Phase 1 Resume
+surfaces: granted-workspace discovery, explicit workspace selection,
+`get_project_context`, `list_project_changes`, the `resume_project` prompt, the
+project-context resource template, and bounded Hermes and OpenClaw profiles.
+
+Production activation is not complete. The companion AuroraCloud policy,
+client/grant, migration, and project-context API work remains tracked by
+[AuroraDocs issue #557](https://github.com/henrikogaard/auroradocs/issues/557);
+there is no companion implementation pull request to link yet. Its database
+migration, service deployment, and live end-to-end integration must be
+completed and verified before the new client-credential and Resume workflows
+can be described as available in production. The documented legacy
+workspace-token path remains the compatibility path until that activation is
+complete.
 
 ## Purpose
 
@@ -191,6 +210,10 @@ to `read:objects` only.
 
 ## Phase 0 - Reliability and policy foundation
 
+**Status:** Runtime reliability work is implemented. AuroraCloud policy,
+client/grant enforcement, legacy-token migration, deployment, and live
+integration are pending under AuroraDocs issue #557.
+
 ### Deliverables
 
 - Validate numeric inputs as bounded integers at both schema and runtime layers.
@@ -219,6 +242,11 @@ to `read:objects` only.
 ## Phase 1 - Resume work
 
 Phase 1 is the first user-facing workflow milestone.
+
+**Status:** The public MCP tools, prompt, resource template, and agent profiles
+are implemented. Production use of the multi-workspace and project-context
+workflow remains pending on the companion AuroraCloud work and live
+integration described above.
 
 ### `get_project_context`
 
