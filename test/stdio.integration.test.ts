@@ -13,6 +13,35 @@ const token = 'aur_mcp_test_example'
 const userId = 'user-test'
 const recordTitle = 'Private launch roadmap'
 
+function projectContextPayload() {
+  return {
+    status: 'ok',
+    workspace: { id: workspaceId, name: 'Test Space' },
+    project: {
+      id: 'project-test',
+      workspaceId,
+      title: 'Launch AuroraDocs',
+      goal: null,
+      status: 'In Progress',
+      priority: null,
+      owner: null,
+      progress: null,
+      startDate: null,
+      dueDate: null,
+      brief: { availability: 'empty', text: null },
+      tasks: { availability: 'empty', groups: { todo: [], in_progress: [], blocked: [], done: [] } },
+      blockers: [],
+      risks: [],
+      unresolvedDecisions: [],
+      recentActivity: [],
+      nextActions: [],
+      sources: [],
+    },
+    asOf: '2026-07-14T12:00:00.000Z',
+    cursor: null,
+  }
+}
+
 function listen(server: Server): Promise<number> {
   return new Promise((resolve, reject) => {
     server.once('error', reject)
@@ -141,6 +170,10 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
       }))
       return
     }
+    if (request.method === 'GET' && url.pathname === `/api/mcp/workspaces/${workspaceId}/projects/context`) {
+      response.end(JSON.stringify(projectContextPayload()))
+      return
+    }
 
     response.statusCode = 404
     response.end(JSON.stringify({ error: `Unexpected route: ${request.method} ${url.pathname}` }))
@@ -171,6 +204,27 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
 
     const listed = await client.listTools()
     assert(listed.tools.some((tool) => tool.name === 'get_mcp_tool_coverage'))
+
+    const prompts = await client.listPrompts()
+    assert(prompts.prompts.some((prompt) => prompt.name === 'resume_project'))
+    const prompt = await client.getPrompt({
+      name: 'resume_project',
+      arguments: { workspace_id: workspaceId, project_id: 'project-test' },
+    })
+    assert.equal(prompt.messages[0]?.content.type, 'text')
+    assert.match(prompt.messages[0]?.content.type === 'text' ? prompt.messages[0].content.text : '', /get_project_context/)
+
+    const templates = await client.listResourceTemplates()
+    assert(templates.resourceTemplates.some((template) => (
+      template.uriTemplate === 'aurora://workspaces/{workspaceId}/projects/{projectId}/context'
+    )))
+    const resource = await client.readResource({
+      uri: `aurora://workspaces/${workspaceId}/projects/project-test/context`,
+    })
+    assert.equal(resource.contents[0]?.mimeType, 'application/json')
+    const resourceContent = resource.contents[0]
+    assert(resourceContent && 'text' in resourceContent)
+    assert.equal(JSON.parse(resourceContent.text).project.id, 'project-test')
 
     const result = await client.callTool({ name: 'get_mcp_tool_coverage', arguments: {} })
     assert.equal(result.isError, false)
@@ -210,6 +264,7 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
     assert.deepEqual(requests.map(({ path }) => path), [
       '/auth/me',
       '/api/collections/workspace_members/records',
+      `/api/mcp/workspaces/${workspaceId}/projects/context`,
       '/api/collections/objects/records',
     ])
     assert(requests.every(({ authorization }) => authorization === `Bearer ${token}`))
