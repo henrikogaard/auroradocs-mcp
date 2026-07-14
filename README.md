@@ -212,6 +212,7 @@ report a vulnerability, follow [SECURITY.md](SECURITY.md).
 ## Reference
 
 - [Tools and scopes](docs/tools.md)
+- [Agent planning and knowledge roadmap](docs/agent-planning-knowledge-roadmap.md)
 - [Security boundaries](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
 - [Contributing](CONTRIBUTING.md)
