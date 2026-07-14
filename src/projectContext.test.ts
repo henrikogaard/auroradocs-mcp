@@ -231,6 +231,14 @@ test('project workflows reject upstream pages that violate requested bounds or p
       nextCursor: null,
       hasMore: true,
     },
+    {
+      status: 'ok', workspace,
+      project: { id: 'project-1', workspaceId: 'workspace-1', title: 'Launch AuroraDocs' },
+      asOf: '2026-07-14T12:00:00.000Z',
+      items: [{ id: 'event-1', type: 'task_updated', title: null, updatedAt: '2026-02-30T11:00:00.000Z' }],
+      nextCursor: null,
+      hasMore: false,
+    },
   ]) {
     await withApi((_req, res) => {
       res.setHeader('content-type', 'application/json')
@@ -243,4 +251,95 @@ test('project workflows reject upstream pages that violate requested bounds or p
       if (result.type === 'error') assert.equal(result.code, 'server_error')
     })
   }
+})
+
+test('project context rejects rollover-invalid calendar dates across every timestamp surface', async () => {
+  const invalidBodies = [
+    { status: 'ok', workspace, project, asOf: '2026-02-30T12:00:00.000Z', cursor: null },
+    { status: 'ok', workspace, project: { ...project, startDate: '2026-02-30' }, asOf: '2026-07-14T12:00:00.000Z', cursor: null },
+    { status: 'ok', workspace, project: { ...project, dueDate: '2026-02-30' }, asOf: '2026-07-14T12:00:00.000Z', cursor: null },
+    {
+      status: 'ok', workspace,
+      project: {
+        ...project,
+        tasks: {
+          ...project.tasks,
+          groups: {
+            ...project.tasks.groups,
+            blocked: [{ ...project.tasks.groups.blocked[0], updatedAt: '2026-02-30T10:00:00.000Z' }],
+          },
+        },
+      },
+      asOf: '2026-07-14T12:00:00.000Z', cursor: null,
+    },
+    {
+      status: 'ok', workspace,
+      project: { ...project, recentActivity: [{ ...project.recentActivity[0], updatedAt: '2026-02-30T09:00:00.000Z' }] },
+      asOf: '2026-07-14T12:00:00.000Z', cursor: null,
+    },
+    {
+      status: 'ok', workspace,
+      project: { ...project, sources: [{ ...project.sources[0], updatedAt: '2026-02-30T08:00:00.000Z' }] },
+      asOf: '2026-07-14T12:00:00.000Z', cursor: null,
+    },
+  ]
+
+  for (const body of invalidBodies) {
+    await withApi((_req, res) => {
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify(body))
+    }, async () => {
+      const result = await executeToolCall('get_project_context', {
+        workspace_id: 'workspace-1', project_id: 'project-1',
+      }, context)
+      assert.deepEqual(result, {
+        type: 'error', code: 'server_error', message: 'AuroraCloud is temporarily unavailable.', retryable: false,
+      })
+      assert.doesNotMatch(formatToolResult(result), /2026-02-30/)
+    })
+  }
+})
+
+test('project context accepts only single-slash local or HTTPS citation links', async () => {
+  for (const maliciousLink of [
+    '//evil.example/steal',
+    '/\\evil.example/steal',
+    '/object/decision-1\\evil',
+    '/object/decision-1%5Cevil',
+    'http://app.auroradocs.eu/object/decision-1',
+  ]) {
+    await withApi((_req, res) => {
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({
+        status: 'ok', workspace,
+        project: { ...project, sources: [{ ...project.sources[0], deepLink: maliciousLink }] },
+        asOf: '2026-07-14T12:00:00.000Z', cursor: null,
+      }))
+    }, async () => {
+      const result = await executeToolCall('get_project_context', {
+        workspace_id: 'workspace-1', project_id: 'project-1',
+      }, context)
+      assert.deepEqual(result, {
+        type: 'error', code: 'server_error', message: 'AuroraCloud is temporarily unavailable.', retryable: false,
+      })
+      assert.doesNotMatch(formatToolResult(result), /evil\.example|http:\/\//)
+    })
+  }
+
+  await withApi((_req, res) => {
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({
+      status: 'ok', workspace,
+      project: { ...project, sources: [{ ...project.sources[0], deepLink: '/object/decision-1' }] },
+      asOf: '2026-07-14T12:00:00.000Z', cursor: null,
+    }))
+  }, async () => {
+    const result = await executeToolCall('get_project_context', {
+      workspace_id: 'workspace-1', project_id: 'project-1',
+    }, context)
+    assert.equal(result.type, 'project_context')
+    if (result.type === 'project_context' && result.status === 'ok') {
+      assert.equal(result.project.sources[0]?.deepLink, '/object/decision-1')
+    }
+  })
 })

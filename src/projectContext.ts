@@ -43,19 +43,41 @@ function nullableString(value: unknown): string | null {
   return string(value)
 }
 
+function isCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1) return false
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const daysInMonth = [31, leapYear ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return day <= (daysInMonth[month - 1] ?? 0)
+}
+
 function timestamp(value: unknown): string {
   const normalized = string(value)
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(normalized)) return invalidResponse()
-  const parsed = Date.parse(normalized)
-  if (!Number.isFinite(parsed)) return invalidResponse()
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{3}))?Z$/.exec(normalized)
+  if (!match) return invalidResponse()
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const hour = Number(match[4])
+  const minute = Number(match[5])
+  const second = Number(match[6])
+  if (
+    !isCalendarDate(year, month, day)
+    || hour > 23
+    || minute > 59
+    || second > 59
+  ) return invalidResponse()
   return normalized
 }
 
 function nullableDate(value: unknown): string | null {
   if (value === null) return null
   const normalized = string(value)
-  if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z)?$/.test(normalized)) return invalidResponse()
-  if (!Number.isFinite(Date.parse(normalized))) return invalidResponse()
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized)
+  if (!dateOnly) return timestamp(normalized)
+  const year = Number(dateOnly[1])
+  const month = Number(dateOnly[2])
+  const day = Number(dateOnly[3])
+  if (!isCalendarDate(year, month, day)) return invalidResponse()
   return normalized
 }
 
@@ -122,14 +144,15 @@ function projectActivity(value: unknown): ProjectActivity {
 
 function deepLink(value: unknown): string {
   const normalized = string(value)
-  if (normalized.startsWith('/')) return normalized
+  if (normalized.includes('\\') || /%5c/i.test(normalized)) return invalidResponse()
+  if (normalized.startsWith('/') && !normalized.startsWith('//')) return normalized
   let url: URL
   try {
     url = new URL(normalized)
   } catch {
     return invalidResponse()
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return invalidResponse()
+  if (url.protocol !== 'https:' || url.username || url.password) return invalidResponse()
   return normalized
 }
 
