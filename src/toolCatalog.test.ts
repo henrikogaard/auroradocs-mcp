@@ -136,7 +136,12 @@ test('list_objects rejects an invalid limit before network access', async () => 
 
     const result = await executeToolCall('list_objects', { workspace_id: 'workspace-1', limit: -1 }, 'workspace-1')
 
-    assert.deepEqual(result, { type: 'error', message: 'limit must be an integer between 1 and 50' })
+    assert.deepEqual(result, {
+      type: 'error',
+      code: 'invalid_input',
+      message: 'limit must be an integer between 1 and 50',
+      retryable: false,
+    })
     assert.equal(requestCount, 0)
   } finally {
     if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
@@ -149,7 +154,12 @@ test('list_objects rejects an invalid limit before network access', async () => 
 test('read_canvas validates required id before reading workspace content', async () => {
   const result = await executeToolCall('read_canvas', {}, 'workspace-1')
 
-  assert.deepEqual(result, { type: 'error', message: 'Canvas object ID is required' })
+  assert.deepEqual(result, {
+    type: 'error',
+    code: 'invalid_input',
+    message: 'Canvas object ID is required',
+    retryable: false,
+  })
 })
 
 test('read_canvas reads canvas content and can omit card text', async () => {
@@ -234,28 +244,71 @@ test('read_canvas reads canvas content and can omit card text', async () => {
 test('list_week_plan validates anchor_date before reading workspace tasks', async () => {
   const result = await executeToolCall('list_week_plan', { anchor_date: '2026/07/07' }, 'workspace-1')
 
-  assert.deepEqual(result, { type: 'error', message: 'anchor_date must be a valid date formatted YYYY-MM-DD' })
+  assert.deepEqual(result, {
+    type: 'error',
+    code: 'invalid_input',
+    message: 'anchor_date must be a valid date formatted YYYY-MM-DD',
+    retryable: false,
+  })
 })
 
 test('list_week_plan rejects impossible calendar dates before reading workspace tasks', async () => {
   const result = await executeToolCall('list_week_plan', { anchor_date: '2026-02-31' }, 'workspace-1')
 
-  assert.deepEqual(result, { type: 'error', message: 'anchor_date must be a valid date formatted YYYY-MM-DD' })
+  assert.deepEqual(result, {
+    type: 'error',
+    code: 'invalid_input',
+    message: 'anchor_date must be a valid date formatted YYYY-MM-DD',
+    retryable: false,
+  })
 })
 
 test('schedule_task_block validates mode, date, and start_time before writing', async () => {
   assert.deepEqual(
     await executeToolCall('schedule_task_block', { mode: 'later', date: '2026-07-07' }, 'workspace-1'),
-    { type: 'error', message: 'mode must be schedule_existing_task or create_time_block' },
+    { type: 'error', code: 'invalid_input', message: 'mode must be schedule_existing_task or create_time_block', retryable: false },
   )
   assert.deepEqual(
     await executeToolCall('schedule_task_block', { mode: 'create_time_block', title: 'Focus', date: '2026-02-31' }, 'workspace-1'),
-    { type: 'error', message: 'date must be a valid date formatted YYYY-MM-DD' },
+    { type: 'error', code: 'invalid_input', message: 'date must be a valid date formatted YYYY-MM-DD', retryable: false },
   )
   assert.deepEqual(
     await executeToolCall('schedule_task_block', { mode: 'create_time_block', title: 'Focus', date: '2026-07-07', start_time: '24:99' }, 'workspace-1'),
-    { type: 'error', message: 'start_time must be a valid time formatted HH:mm' },
+    { type: 'error', code: 'invalid_input', message: 'start_time must be a valid time formatted HH:mm', retryable: false },
   )
+})
+
+test('dispatcher maps task-list server failures without exposing upstream response text', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const server = createServer((_req, res) => {
+    res.statusCode = 503
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ code: 'server_error', message: 'private database detail' }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const result = await executeToolCall('list_task_lists', {}, 'workspace-1')
+
+    assert.deepEqual(result, {
+      type: 'error',
+      code: 'server_error',
+      message: 'AuroraCloud is temporarily unavailable.',
+      retryable: true,
+    })
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
 })
 
 test('schedule_task_block preserves existing task time when scheduling an existing task', async () => {

@@ -5,6 +5,9 @@
  * On authenticate(), the server verifies the caller is a member of
  * that workspace — if not, the process exits.
  */
+import type { ContentReadResult } from './contracts.js'
+import { AuroraApiError } from './errors.js'
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type AuroraObjectRecord = {
@@ -256,8 +259,9 @@ export async function getObject(id: string, workspaceId: string): Promise<Aurora
     // SECURITY: reject objects outside the configured workspace
     if (obj.workspace_id !== workspaceId) return null
     return obj
-  } catch {
-    return null
+  } catch (error) {
+    if (error instanceof AuroraApiError && error.status === 404) return null
+    throw error
   }
 }
 
@@ -290,25 +294,37 @@ export async function deleteObject(id: string, workspaceId: string): Promise<voi
 
 // ── Content ──────────────────────────────────────────────────────────────────
 
-export async function getContent(objectId: string, workspaceId: string): Promise<string | null> {
-  // Verify object belongs to workspace
-  const obj = await getObject(objectId, workspaceId)
-  if (!obj) return null
-
-  const client = getAuroraClient()
+export async function getContent(objectId: string, workspaceId: string): Promise<ContentReadResult> {
   try {
+    // Verify object belongs to workspace
+    const obj = await getObject(objectId, workspaceId)
+    if (!obj) return { availability: 'not_found', text: null }
+
+    const client = getAuroraClient()
     const records = await client.collection('content').listPage({
       filter: client.filter('object_id = {:id}', { id: objectId }),
       page: 1,
       perPage: 1,
     })
     const r = records.items[0]
-    if (!r) return null
+    if (!r) return { availability: 'empty', text: null }
     const json = r['content_json']
-    if (!json) return null
-    return extractTextFromDoc(typeof json === 'string' ? JSON.parse(json) : json)
-  } catch {
-    return null
+    if (!json) return { availability: 'empty', text: null }
+    if (typeof json === 'string' && (json.startsWith('v1:') || json.startsWith('v2:'))) {
+      return { availability: 'encrypted_locked', text: null }
+    }
+    const text = extractTextFromDoc(typeof json === 'string' ? JSON.parse(json) : json)
+    return text.trim()
+      ? { availability: 'available', text }
+      : { availability: 'empty', text: null }
+  } catch (error) {
+    if (error instanceof AuroraApiError && error.status === 403) {
+      return { availability: 'permission_denied', text: null }
+    }
+    if (error instanceof AuroraApiError && error.status === 404) {
+      return { availability: 'not_found', text: null }
+    }
+    throw error
   }
 }
 
@@ -534,21 +550,17 @@ export async function listMembers(workspaceId: string): Promise<AuroraWorkspaceM
 
 export async function listTaskLists(workspaceId: string): Promise<AuroraTaskList[]> {
   const client = getAuroraClient()
-  try {
-    const records = await client.collection('task_lists').listPage({
-      filter: client.filter('workspace_id = {:wid}', { wid: workspaceId }),
-      sort: 'position',
-      page: 1,
-      perPage: 50,
-    })
-    return records.items.map((r) => ({
-      id: r['id'] as string,
-      name: r['name'] as string,
-      default_status: (r['default_status'] as string | null) ?? null,
-    }))
-  } catch {
-    return []
-  }
+  const records = await client.collection('task_lists').listPage({
+    filter: client.filter('workspace_id = {:wid}', { wid: workspaceId }),
+    sort: 'position',
+    page: 1,
+    perPage: 50,
+  })
+  return records.items.map((r) => ({
+    id: r['id'] as string,
+    name: r['name'] as string,
+    default_status: (r['default_status'] as string | null) ?? null,
+  }))
 }
 
 export async function listTaskStatuses(_workspaceId: string): Promise<string[]> {
@@ -884,20 +896,32 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
     const headers = new Headers()
     if (authStore.token) headers.set('authorization', `Bearer ${authStore.token}`)
     if (options.body !== undefined) headers.set('content-type', 'application/json')
-    const response = await fetch(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
-      method: options.method ?? 'GET',
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    })
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
+        method: options.method ?? 'GET',
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      })
+    } catch (error) {
+      throw new AuroraApiError(
+        0,
+        'network_error',
+        error instanceof Error ? error.message : 'Network request failed',
+      )
+    }
     if (!response.ok) {
       let message = `${response.status} ${response.statusText}`
+      let code: string | null = null
       try {
-        const json = await response.json() as { error?: string; message?: string }
-        message = json.error ?? json.message ?? message
+        const json = await response.json() as { code?: unknown; error?: unknown; message?: unknown }
+        if (typeof json.code === 'string') code = json.code
+        if (typeof json.error === 'string') message = json.error
+        else if (typeof json.message === 'string') message = json.message
       } catch {
         // ignore parse failure
       }
-      throw new Error(message)
+      throw new AuroraApiError(response.status, code, message, readRetryAfterSeconds(response.headers.get('retry-after')))
     }
     if (response.status === 204) return undefined as T
     return await response.json() as T
@@ -948,6 +972,15 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
   })
 
   return { authStore, filter, collection, request }
+}
+
+function readRetryAfterSeconds(value: string | null): number | null {
+  if (!value) return null
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds)
+  const retryAt = Date.parse(value)
+  if (Number.isNaN(retryAt)) return null
+  return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000))
 }
 
 function toQueryString(

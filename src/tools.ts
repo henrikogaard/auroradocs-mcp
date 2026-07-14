@@ -36,12 +36,14 @@ import type { McpCanvasReadResult, McpWeekPlan } from './planningTools.js'
 import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js'
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
 import { readBoundedInteger } from './input.js'
+import { toSafeToolError } from './errors.js'
+import type { Availability, ToolErrorResult } from './contracts.js'
 
 // ── Result types ─────────────────────────────────────────────────────────────
 
 export type ToolResult =
   | { type: 'objects'; objects: { id: string; title: string | null; type: string; icon: string | null }[] }
-  | { type: 'object'; object: { id: string; title: string | null; type: string; icon: string | null }; content: string | null; properties: Record<string, string> }
+  | { type: 'object'; object: { id: string; title: string | null; type: string; icon: string | null }; availability: Availability; content: string | null; properties: Record<string, string> }
   | { type: 'created'; id: string; title: string }
   | { type: 'task_created'; id: string; title: string; status: string | null; task_list_name: string | null }
   | { type: 'task_updated'; id: string; title: string; changed_fields: string[] }
@@ -61,7 +63,7 @@ export type ToolResult =
   | { type: 'task_lists'; task_lists: { id: string; name: string }[] }
   | { type: 'task_statuses'; statuses: string[] }
   | { type: 'no_op'; message: string }
-  | { type: 'error'; message: string }
+  | ToolErrorResult
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -75,6 +77,14 @@ function readStringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean)
   if (typeof value === 'string') return value.split(',').map((v) => v.trim()).filter(Boolean)
   return []
+}
+
+function invalidInput(message: string): ToolErrorResult {
+  return { type: 'error', code: 'invalid_input', message, retryable: false }
+}
+
+function notFound(message: string): ToolErrorResult {
+  return { type: 'error', code: 'not_found', message, retryable: false }
 }
 
 function todayDateKey(): string {
@@ -169,7 +179,18 @@ export async function executeToolCall(
   workspaceId: string,
 ): Promise<ToolResult> {
   try {
-    switch (name) {
+    return await executeToolCallUnsafe(name, input, workspaceId)
+  } catch (error) {
+    return toSafeToolError(error)
+  }
+}
+
+async function executeToolCallUnsafe(
+  name: string,
+  input: Record<string, unknown>,
+  workspaceId: string,
+): Promise<ToolResult> {
+  switch (name) {
       // ── Read tools ─────────────────────────────────────────────────────
 
       case 'search':
@@ -177,7 +198,7 @@ export async function executeToolCall(
         const query = String(input['query'] ?? '').trim()
         const typeFilter = input['type'] ? String(input['type']) : undefined
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 10, min: 1, max: 50 })
-        if (!limit.ok) return { type: 'error', message: limit.message }
+        if (!limit.ok) return invalidInput(limit.message)
         const sources = await searchObjectsPage(workspaceId, query, limit.value)
         const matches = [...new Map(
           sources
@@ -195,7 +216,7 @@ export async function executeToolCall(
       case 'list_objects': {
         const typeFilter = input['type'] ? String(input['type']) : undefined
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
-        if (!limit.ok) return { type: 'error', message: limit.message }
+        if (!limit.ok) return invalidInput(limit.message)
         const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value)
         const results = page.items
           .filter((o) => !o.is_template)
@@ -206,7 +227,7 @@ export async function executeToolCall(
       case 'list_recent': {
         const typeFilter = input['type'] ? String(input['type']) : undefined
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
-        if (!limit.ok) return { type: 'error', message: limit.message }
+        if (!limit.ok) return invalidInput(limit.message)
         const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value)
         const results = page.items
           .filter((o) => !o.is_template)
@@ -216,34 +237,34 @@ export async function executeToolCall(
 
       case 'wiki_search': {
         const query = readString(input['query'])
-        if (!query) return { type: 'error', message: 'Query is required' }
+        if (!query) return invalidInput('Query is required')
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
-        if (!limit.ok) return { type: 'error', message: limit.message }
+        if (!limit.ok) return invalidInput(limit.message)
         const sources = await searchWorkspaceKnowledgeServer(workspaceId, query, limit.value)
         return { type: 'knowledge_sources', sources }
       }
 
       case 'wiki_get_page': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Object ID is required' }
+        if (!id) return invalidInput('Object ID is required')
         const includeFullText = Boolean(input['includeFullText'])
         const source = await getWorkspaceKnowledgeObjectServer(workspaceId, id, includeFullText)
-        if (!source) return { type: 'error', message: `Object ${id} not found in this workspace` }
+        if (!source) return notFound(`Object ${id} not found in this workspace`)
         return { type: 'knowledge_sources', sources: [source] }
       }
 
       case 'wiki_related': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Object ID is required' }
+        if (!id) return invalidInput('Object ID is required')
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 6, min: 1, max: 10 })
-        if (!limit.ok) return { type: 'error', message: limit.message }
+        if (!limit.ok) return invalidInput(limit.message)
         const sources = await listWorkspaceRelatedKnowledgeServer(workspaceId, id, limit.value)
         return { type: 'knowledge_sources', sources }
       }
 
       case 'wiki_recent': {
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 6, min: 1, max: 10 })
-        if (!limit.ok) return { type: 'error', message: limit.message }
+        if (!limit.ok) return invalidInput(limit.message)
         const sources = await listWorkspaceRecentKnowledgeServer(workspaceId, limit.value)
         return { type: 'knowledge_sources', sources }
       }
@@ -251,13 +272,9 @@ export async function executeToolCall(
       case 'get_object': {
         const id = String(input['id'] ?? '')
         const obj = await getObject(id, workspaceId)
-        if (!obj) return { type: 'error', message: `Object ${id} not found in this workspace` }
+        if (!obj) return notFound(`Object ${id} not found in this workspace`)
 
         const content = await getContent(id, workspaceId)
-        // Detect E2EE content
-        const displayContent = content && (content.startsWith('v1:') || content.startsWith('v2:'))
-          ? '[Content is end-to-end encrypted and cannot be read by the MCP server]'
-          : content
 
         // Include properties
         const rawProps = await listProperties([id], workspaceId)
@@ -275,7 +292,8 @@ export async function executeToolCall(
         return {
           type: 'object',
           object: { id: obj.id, title: obj.title, type: obj.type, icon: obj.icon },
-          content: displayContent ?? null,
+          availability: content.availability,
+          content: content.text,
           properties,
         }
       }
@@ -304,12 +322,12 @@ export async function executeToolCall(
       case 'list_week_plan': {
         const anchorDate = readString(input['anchor_date']) ?? todayDateKey()
         if (!isDateKey(anchorDate)) {
-          return { type: 'error', message: 'anchor_date must be a valid date formatted YYYY-MM-DD' }
+          return invalidInput('anchor_date must be a valid date formatted YYYY-MM-DD')
         }
 
         const includeUnscheduled = input['include_unscheduled'] !== false
         const unscheduledLimit = readBoundedInteger(input, 'unscheduled_limit', { defaultValue: 12, min: 1, max: 50 })
-        if (!unscheduledLimit.ok) return { type: 'error', message: unscheduledLimit.message }
+        if (!unscheduledLimit.ok) return invalidInput(unscheduledLimit.message)
         const tasks = await listPlanningTasks(workspaceId)
         return {
           type: 'week_plan',
@@ -330,9 +348,9 @@ export async function executeToolCall(
 
       case 'read_canvas': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Canvas object ID is required' }
+        if (!id) return invalidInput('Canvas object ID is required')
         const result = await readCanvasContent(workspaceId, id)
-        if (!result) return { type: 'error', message: `Canvas ${id} not found in this workspace` }
+        if (!result) return notFound(`Canvas ${id} not found in this workspace`)
         const includeText = input['include_text'] !== false
         return {
           type: 'canvas',
@@ -348,27 +366,27 @@ export async function executeToolCall(
         const mode = readString(input['mode'])
         const date = readString(input['date'])
         if (mode !== 'schedule_existing_task' && mode !== 'create_time_block') {
-          return { type: 'error', message: 'mode must be schedule_existing_task or create_time_block' }
+          return invalidInput('mode must be schedule_existing_task or create_time_block')
         }
         if (!date || !isDateKey(date)) {
-          return { type: 'error', message: 'date must be a valid date formatted YYYY-MM-DD' }
+          return invalidInput('date must be a valid date formatted YYYY-MM-DD')
         }
 
         const startTime = readString(input['start_time'])
         if (startTime && !isTimeKey(startTime)) {
-          return { type: 'error', message: 'start_time must be a valid time formatted HH:mm' }
+          return invalidInput('start_time must be a valid time formatted HH:mm')
         }
 
         if (mode === 'schedule_existing_task') {
           const taskId = readString(input['task_id'])
-          if (!taskId) return { type: 'error', message: 'task_id is required for schedule_existing_task' }
+          if (!taskId) return invalidInput('task_id is required for schedule_existing_task')
 
           const object = await getObject(taskId, workspaceId)
-          if (!object) return { type: 'error', message: `Object ${taskId} not found in this workspace` }
-          if (object.type !== 'task') return { type: 'error', message: `${taskId} is not a task` }
+          if (!object) return notFound(`Object ${taskId} not found in this workspace`)
+          if (object.type !== 'task') return invalidInput(`${taskId} is not a task`)
 
           const props = await getTaskProps(taskId, workspaceId)
-          if (props.status === 'Done') return { type: 'error', message: 'Completed tasks cannot be scheduled' }
+          if (props.status === 'Done') return invalidInput('Completed tasks cannot be scheduled')
 
           const dueDate = startTime ? `${date}T${startTime}` : weekPlanningDueDateForDay(date, props.due_date)
           await updateTaskProps(taskId, workspaceId, { due_date: dueDate })
@@ -376,14 +394,14 @@ export async function executeToolCall(
         }
 
         const title = readString(input['title'])
-        if (!title) return { type: 'error', message: 'title is required for create_time_block' }
+        if (!title) return invalidInput('title is required for create_time_block')
 
         const durationRaw = input['duration_minutes']
         if (
           durationRaw !== undefined
           && (typeof durationRaw !== 'number' || !Number.isFinite(durationRaw) || durationRaw <= 0)
         ) {
-          return { type: 'error', message: 'duration_minutes must be a positive number' }
+          return invalidInput('duration_minutes must be a positive number')
         }
 
         const blockInput = buildWeekPlanningTimeBlockTaskInput({
@@ -405,7 +423,7 @@ export async function executeToolCall(
 
       case 'create_object': {
         const type = String(input['type'] ?? 'page')
-        if (type === 'task') return { type: 'error', message: 'Use create_task for tasks' }
+        if (type === 'task') return invalidInput('Use create_task for tasks')
         const title = String(input['title'] ?? 'Untitled')
         const obj = await createObject(workspaceId, type, title)
         return { type: 'created', id: obj.id, title: obj.title ?? title }
@@ -413,7 +431,7 @@ export async function executeToolCall(
 
       case 'create_task': {
         const title = readString(input['title'])
-        if (!title) return { type: 'error', message: 'Task title is required' }
+        if (!title) return invalidInput('Task title is required')
 
         const obj = await createObject(workspaceId, 'task', title)
 
@@ -432,16 +450,16 @@ export async function executeToolCall(
 
       case 'update_task': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Task ID is required' }
+        if (!id) return invalidInput('Task ID is required')
 
         const obj = await getObject(id, workspaceId)
-        if (!obj) return { type: 'error', message: `Object ${id} not found in this workspace` }
-        if (obj.type !== 'task') return { type: 'error', message: `${id} is not a task` }
+        if (!obj) return notFound(`Object ${id} not found in this workspace`)
+        if (obj.type !== 'task') return invalidInput(`${id} is not a task`)
 
         const changedFields: string[] = []
         if ('title' in input) {
           const newTitle = readString(input['title'])
-          if (!newTitle) return { type: 'error', message: 'Task title cannot be empty' }
+          if (!newTitle) return invalidInput('Task title cannot be empty')
           await updateObjectTitle(id, newTitle, workspaceId)
           changedFields.push('title')
         }
@@ -470,21 +488,21 @@ export async function executeToolCall(
 
       case 'update_object': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Object ID is required' }
+        if (!id) return invalidInput('Object ID is required')
 
         const obj = await getObject(id, workspaceId)
-        if (!obj) return { type: 'error', message: `Object ${id} not found in this workspace` }
+        if (!obj) return notFound(`Object ${id} not found in this workspace`)
 
         const changedFields: string[] = []
         if ('title' in input) {
           const title = readString(input['title'])
-          if (!title) return { type: 'error', message: 'Object title cannot be empty' }
+          if (!title) return invalidInput('Object title cannot be empty')
           await updateObjectTitle(id, title, workspaceId)
           changedFields.push('title')
         }
         if ('text' in input || 'content' in input) {
           const text = readString(input['text'] ?? input['content'])
-          if (!text) return { type: 'error', message: 'Object content cannot be empty' }
+          if (!text) return invalidInput('Object content cannot be empty')
           await setContent(id, workspaceId, textToTipTapDoc(text))
           changedFields.push('content')
         }
@@ -506,8 +524,8 @@ export async function executeToolCall(
       case 'append_block': {
         const id = readString(input['id'])
         const text = readString(input['text'] ?? input['content'])
-        if (!id) return { type: 'error', message: 'Object ID is required' }
-        if (!text) return { type: 'error', message: 'Text is required' }
+        if (!id) return invalidInput('Object ID is required')
+        if (!text) return invalidInput('Text is required')
         await appendContentText(id, workspaceId, text)
         return { type: 'content_appended', id }
       }
@@ -531,10 +549,7 @@ export async function executeToolCall(
         return { type: 'no_op', message: 'Navigation is not supported in the MCP server context.' }
 
       default:
-        return { type: 'error', message: `Unknown tool: ${name}` }
-    }
-  } catch (err) {
-    return { type: 'error', message: err instanceof Error ? err.message : String(err) }
+        return invalidInput(`Unknown tool: ${name}`)
   }
 }
 
@@ -637,7 +652,15 @@ export function formatToolResult(result: ToolResult): string {
       return [
         `**${result.object.title ?? 'Untitled'}** (${result.object.type}, ${result.object.id})`,
         propLines ? `\nProperties:\n${propLines}` : '',
-        result.content ? `\n\n${result.content}` : '\n*(no content)*',
+        result.content
+          ? `\n\n${result.content}`
+          : result.availability === 'encrypted_locked'
+            ? '\n*(content is end-to-end encrypted and locked)*'
+            : result.availability === 'permission_denied'
+              ? '\n*(permission denied for content)*'
+              : result.availability === 'not_found'
+                ? '\n*(content not found)*'
+                : '\n*(no content)*',
       ].join('')
     }
     case 'created':
