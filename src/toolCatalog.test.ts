@@ -311,6 +311,70 @@ test('dispatcher maps task-list server failures without exposing upstream respon
   }
 })
 
+test('dispatcher does not expose malformed content JSON excerpts', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const privateFixture = 'private-content-fragment'
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    res.setHeader('content-type', 'application/json')
+
+    if (url.pathname === '/api/collections/objects/records/object-1') {
+      res.end(JSON.stringify({
+        id: 'object-1',
+        workspace_id: 'workspace-1',
+        type: 'page',
+        title: 'Malformed content',
+        icon: null,
+        parent_id: null,
+        is_deleted: false,
+        is_template: false,
+        created_at: '2026-07-01T10:00:00Z',
+        updated_at: '2026-07-01T12:00:00Z',
+      }))
+      return
+    }
+
+    if (url.pathname === '/api/collections/content/records') {
+      res.end(JSON.stringify({
+        items: [{ id: 'content-1', object_id: 'object-1', content_json: `{${privateFixture}` }],
+        page: 1,
+        perPage: 1,
+        totalPages: 1,
+        totalItems: 1,
+      }))
+      return
+    }
+
+    res.statusCode = 500
+    res.end(JSON.stringify({ code: 'server_error' }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const result = await executeToolCall('get_object', { id: 'object-1' }, 'workspace-1')
+
+    assert.deepEqual(result, {
+      type: 'error',
+      code: 'server_error',
+      message: 'AuroraCloud is temporarily unavailable.',
+      retryable: false,
+    })
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(privateFixture))
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
 test('schedule_task_block preserves existing task time when scheduling an existing task', async () => {
   const previousApiUrl = process.env['AURORA_API_URL']
   const patches: Array<{ id: string; body: Record<string, unknown> }> = []

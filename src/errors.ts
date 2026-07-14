@@ -12,6 +12,13 @@ export class AuroraApiError extends Error {
   }
 }
 
+export class ToolInputError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ToolInputError'
+  }
+}
+
 const PUBLIC_ERROR_MESSAGES: Record<Exclude<ToolErrorCode, 'rate_limited'>, string> = {
   invalid_input: 'AuroraCloud rejected the request.',
   authentication_failed: 'AuroraCloud authentication failed.',
@@ -22,13 +29,26 @@ const PUBLIC_ERROR_MESSAGES: Record<Exclude<ToolErrorCode, 'rate_limited'>, stri
 }
 
 function apiErrorCode(error: AuroraApiError): ToolErrorCode {
-  if (error.status === 0 || error.code === 'network_error') return 'network_error'
-  if (error.status === 400 || error.status === 422 || error.code === 'invalid_input') return 'invalid_input'
-  if (error.status === 401 || error.code === 'authentication_failed') return 'authentication_failed'
-  if (error.status === 403 || error.code === 'permission_denied') return 'permission_denied'
-  if (error.status === 404 || error.code === 'not_found') return 'not_found'
-  if (error.status === 429 || error.code === 'rate_limited') return 'rate_limited'
-  return 'server_error'
+  if (error.status === 0) return 'network_error'
+  if (error.status === 400 || error.status === 422) return 'invalid_input'
+  if (error.status === 401) return 'authentication_failed'
+  if (error.status === 403) return 'permission_denied'
+  if (error.status === 404) return 'not_found'
+  if (error.status === 429) return 'rate_limited'
+  if (error.status >= 500 && error.status <= 599) return 'server_error'
+
+  switch (error.code) {
+    case 'network_error':
+    case 'invalid_input':
+    case 'authentication_failed':
+    case 'permission_denied':
+    case 'not_found':
+    case 'rate_limited':
+    case 'server_error':
+      return error.code
+    default:
+      return 'server_error'
+  }
 }
 
 export function toSafeToolError(error: unknown): ToolErrorResult {
@@ -52,19 +72,19 @@ export function toSafeToolError(error: unknown): ToolErrorResult {
     }
   }
 
-  if (error instanceof TypeError) {
+  if (error instanceof ToolInputError) {
     return {
       type: 'error',
-      code: 'network_error',
-      message: PUBLIC_ERROR_MESSAGES.network_error,
-      retryable: true,
+      code: 'invalid_input',
+      message: error.message,
+      retryable: false,
     }
   }
 
   return {
     type: 'error',
-    code: 'invalid_input',
-    message: error instanceof Error ? error.message : 'Invalid tool input.',
+    code: 'server_error',
+    message: PUBLIC_ERROR_MESSAGES.server_error,
     retryable: false,
   }
 }

@@ -36,7 +36,7 @@ import type { McpCanvasReadResult, McpWeekPlan } from './planningTools.js'
 import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js'
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
 import { readBoundedInteger } from './input.js'
-import { toSafeToolError } from './errors.js'
+import { ToolInputError, toSafeToolError } from './errors.js'
 import type { Availability, ToolErrorResult } from './contracts.js'
 
 // ── Result types ─────────────────────────────────────────────────────────────
@@ -575,7 +575,7 @@ async function resolveTaskInput(
     if (raw === null) patch.priority = null
     else {
       const normalized = normalizePriority(raw)
-      if (!normalized) throw new Error(`Unknown priority: ${raw}`)
+      if (!normalized) throw new ToolInputError(`Unknown priority: ${raw}`)
       patch.priority = normalized
     }
   }
@@ -601,7 +601,7 @@ async function resolveTaskInput(
     } else {
       const lists = await listTaskLists(workspaceId)
       const match = matchTaskList(query, lists)
-      if (!match) throw new Error(`Could not resolve task list: ${query}`)
+      if (!match) throw new ToolInputError(`Could not resolve task list: ${query}`)
       patch.task_list_id = match.id
       // Apply default status if not explicitly set
       if (patch.status === undefined && match.default_status) {
@@ -618,7 +618,7 @@ async function resolveTaskInput(
       const members = await listMembers(workspaceId)
       const resolved = queries.map((q) => {
         const m = matchMember(q, members)
-        if (!m) throw new Error(`Could not resolve assignee: ${q}`)
+        if (!m) throw new ToolInputError(`Could not resolve assignee: ${q}`)
         return m.id
       })
       patch.assignees = [...new Set(resolved)]
