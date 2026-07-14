@@ -286,7 +286,7 @@ export function normalizeProjectChangesResponse(
 
 export async function getProjectContext(
   workspaceId: string,
-  input: { projectId?: string; query?: string; activityDays: number; taskLimit: number; sourceLimit: number; cursor?: string },
+  input: { projectId?: string; query?: string; activityDays: number; taskLimit: number; sourceLimit: number },
 ): Promise<ProjectContextResult> {
   const query = new URLSearchParams()
   if (input.projectId !== undefined) query.set('project_id', input.projectId)
@@ -294,7 +294,6 @@ export async function getProjectContext(
   query.set('activity_days', String(input.activityDays))
   query.set('task_limit', String(input.taskLimit))
   query.set('source_limit', String(input.sourceLimit))
-  if (input.cursor !== undefined) query.set('cursor', input.cursor)
   const response = await getAuroraClient().request<unknown>(
     `/api/mcp/workspaces/${encodeURIComponent(workspaceId)}/projects/context?${query.toString()}`,
     { method: 'GET' },

@@ -392,14 +392,11 @@ async function executeToolCallUnsafe(
         if (!taskLimit.ok) return invalidInput(taskLimit.message)
         const sourceLimit = readBoundedInteger(input, 'source_limit', { defaultValue: 10, min: 1, max: 25 })
         if (!sourceLimit.ok) return invalidInput(sourceLimit.message)
-        const cursor = Object.hasOwn(input, 'cursor') ? readString(input['cursor']) : undefined
-        if (Object.hasOwn(input, 'cursor') && !cursor) return invalidInput('cursor must be a non-empty string')
         const result = await getProjectContext(workspaceId, {
           ...(projectId ? { projectId } : { query: query as string }),
           activityDays: activityDays.value,
           taskLimit: taskLimit.value,
           sourceLimit: sourceLimit.value,
-          ...(cursor ? { cursor } : {}),
         })
         return { type: 'project_context', ...result }
       }

@@ -312,6 +312,16 @@ test('MCP tool catalog declares bounded integer schemas for count inputs', () =>
   }
 })
 
+test('get_project_context does not publish a continuation cursor input', () => {
+  const definition = getToolDefinitions().find((tool) => tool.name === 'get_project_context')
+  assert(definition)
+  assert.equal(definition.inputSchema.properties['cursor'], undefined)
+  const changes = getToolDefinitions().find((tool) => tool.name === 'list_project_changes')
+  assert(changes)
+  assert.equal(changes.inputSchema.properties['cursor']?.type, 'string')
+  assert.ok(changes.inputSchema.required?.includes('cursor'))
+})
+
 test('list_objects rejects an invalid limit before network access', async () => {
   const previousApiUrl = process.env['AURORA_API_URL']
   let requestCount = 0

@@ -108,6 +108,22 @@ test('get_project_context returns a citation-ready resume packet', async () => {
   })
 })
 
+test('get_project_context never forwards an unsupported input cursor', async () => {
+  await withApi((_req, res) => {
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ status: 'ok', workspace, project, asOf: '2026-07-14T12:00:00.000Z', cursor: 'cursor-1' }))
+  }, async (requests) => {
+    const result = await executeToolCall('get_project_context', {
+      workspace_id: 'workspace-1',
+      project_id: 'project-1',
+      cursor: 'unsupported-cursor',
+    }, context)
+
+    assert.equal(result.type, 'project_context')
+    assert.deepEqual(requests, ['/api/mcp/workspaces/workspace-1/projects/context?project_id=project-1&activity_days=14&task_limit=20&source_limit=10'])
+  })
+})
+
 test('ambiguous name query returns candidates and never picks one', async () => {
   await withApi((_req, res) => {
     res.setHeader('content-type', 'application/json')

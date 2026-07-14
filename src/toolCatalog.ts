@@ -750,7 +750,6 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
         activity_days: { type: 'integer', minimum: 1, maximum: 90, description: 'Recent activity window in days (default 14)' },
         task_limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum project tasks (default 20)' },
         source_limit: { type: 'integer', minimum: 1, maximum: 25, description: 'Maximum citation sources (default 10)' },
-        cursor: { type: 'string', description: 'Optional opaque project-context cursor' },
       },
       oneOf: [
         { type: 'object', properties: { project_id: stringSchema }, required: ['project_id'] },
