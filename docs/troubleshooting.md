@@ -12,7 +12,7 @@ logs, screenshots, issues, or support messages. Use the token fingerprint from
 | Server exits with `AURORA_WORKSPACE_ID environment variable is required` | The workspace ID is absent or misspelled. | Copy it again from the MCP Access configuration snippet and update the local client entry. |
 | Server exits with `AURORA_API_URL environment variable is required` | The API URL is missing. | Set it to `https://api.auroradocs.eu`. Do not add `/mcp`. |
 | Authentication is missing | `AURORA_API_TOKEN` was not passed to the child process. | Add the MCP token environment variable to the server entry. Do not use email/password authentication. |
-| Client shows no tools | The stdio process failed, is still connecting, or the client has stale configuration. | Inspect the client's MCP status, confirm the command is `npx -y @henrikogaard/auroradocs-mcp@0.1.1`, then restart the client. |
+| Client shows no tools | The stdio process failed, is still connecting, or the client has stale configuration. | Inspect the client's MCP status, confirm the command is `npx -y @henrikogard/auroradocs-mcp@0.1.1`, then restart the client. |
 | JSON configuration will not load | Invalid JSON, usually a missing comma or an overwritten outer `mcpServers` object. | Validate the file as JSON and merge the server entry with existing entries. JSON cannot contain comments. |
 | Works in a terminal but not the desktop client | Desktop apps often use a different PATH and environment. | Keep all three Aurora variables in the MCP server's `env` object and restart the desktop app. |
 
