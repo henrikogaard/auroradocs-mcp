@@ -11,6 +11,77 @@ import {
 } from './toolCatalog.js'
 import { executeToolCall, formatToolResult } from './tools.js'
 import { resetAuroraClientForTests } from './auroraClient.js'
+import type { AuroraConnectionContext } from './contracts.js'
+
+const multiWorkspaceContext: AuroraConnectionContext = {
+  kind: 'client',
+  workspaces: [
+    { workspaceId: 'workspace-a1b2', alias: 'henrik-pkm-a1b2', name: 'Henrik PKM', role: 'owner', scopes: ['read:objects'], grantId: 'grant-1', expiresAt: '2026-10-01T00:00:00.000Z' },
+    { workspaceId: 'workspace-c3d4', alias: 'aurora-work-c3d4', name: 'Aurora Work', role: 'editor', scopes: ['read:objects'], grantId: 'grant-2', expiresAt: '2026-09-01T00:00:00.000Z' },
+  ],
+}
+
+test('list_workspaces exposes only the granted workspace contract', async () => {
+  assert.deepEqual(await executeToolCall('list_workspaces', {}, multiWorkspaceContext), {
+    type: 'workspaces',
+    workspaces: multiWorkspaceContext.workspaces,
+  })
+})
+
+test('client mode requires an unambiguous workspace selector before a data request', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  let requestCount = 0
+  const server = createServer((_req, res) => {
+    requestCount += 1
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ items: [] }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    assert.deepEqual(await executeToolCall('list_objects', { limit: 10 }, multiWorkspaceContext), {
+      type: 'error', code: 'invalid_input', message: 'workspace_id or workspace_alias is required', retryable: false,
+    })
+    assert.deepEqual(await executeToolCall('list_objects', { workspace_alias: 'missing' }, multiWorkspaceContext), {
+      type: 'error', code: 'invalid_input', message: 'Workspace selector does not match an available grant', retryable: false,
+    })
+    assert.deepEqual(await executeToolCall('list_objects', { workspace_id: 'workspace-a1b2', workspace_alias: 'henrik-pkm-a1b2' }, multiWorkspaceContext), {
+      type: 'error', code: 'invalid_input', message: 'Provide only one of workspace_id or workspace_alias', retryable: false,
+    })
+    assert.equal(requestCount, 0)
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
+test('legacy mode defaults to its configured workspace and rejects a different selector', async () => {
+  const context: AuroraConnectionContext = { kind: 'legacy_workspace', defaultWorkspaceId: 'workspace-1', workspaces: [] }
+  assert.deepEqual(await executeToolCall('list_objects', { workspace_id: 'workspace-2' }, context), {
+    type: 'error', code: 'invalid_input', message: 'Legacy credentials are restricted to the configured workspace', retryable: false,
+  })
+})
+
+test('every data tool accepts optional workspace selectors while list_workspaces does not', () => {
+  const definitions = getToolDefinitions()
+  const excluded = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+  for (const tool of definitions) {
+    if (excluded.has(tool.name)) {
+      assert.equal(tool.inputSchema.properties['workspace_id'], undefined, tool.name)
+      assert.equal(tool.inputSchema.properties['workspace_alias'], undefined, tool.name)
+    } else {
+      assert.equal(tool.inputSchema.properties['workspace_id']?.type, 'string', tool.name)
+      assert.equal(tool.inputSchema.properties['workspace_alias']?.type, 'string', tool.name)
+    }
+  }
+})
 
 test('MCP tool catalog exposes planning and canvas coverage with priorities', () => {
   const audit = getMcpToolCoverageAudit()
@@ -51,6 +122,7 @@ test('MCP catalog tools are registered and formatted as read-only results', asyn
 
 test('MCP tool catalog authoritatively classifies every registered tool effect', () => {
   const expected = {
+    list_workspaces: 'read',
     search_objects: 'read',
     search: 'read',
     list_objects: 'read',
@@ -86,9 +158,10 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
 })
 
 test('every tool declares output schema and accurate effect annotations', () => {
-  const localReadTools = new Set(['list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+  const localReadTools = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
   const nonIdempotentTools = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block'])
   const successResultTypes: Record<string, string[]> = {
+    list_workspaces: ['workspaces'],
     search_objects: ['objects'],
     search: ['objects'],
     list_objects: ['objects'],

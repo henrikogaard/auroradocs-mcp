@@ -5,7 +5,7 @@
  * On authenticate(), the server verifies the caller is a member of
  * that workspace — if not, the process exits.
  */
-import type { ContentReadResult } from './contracts.js'
+import type { AuroraConnectionContext, ContentReadResult, GrantedWorkspace } from './contracts.js'
 import { AuroraApiError, ToolInputError, ToolNotFoundError } from './errors.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -174,13 +174,32 @@ export function getAuroraClient(): BackendClient {
  * Authenticate and verify workspace membership.
  * Exits the process if the user is not a member of the target workspace.
  */
-export async function authenticate(): Promise<void> {
-  const client = getAuroraClient()
-  const workspaceId = process.env['AURORA_WORKSPACE_ID']
+export type AuthenticateOptions = {
+  token?: string
+  workspaceId?: string
+}
 
-  const token = process.env['AURORA_API_TOKEN']
+export async function listGrantedWorkspaces(): Promise<GrantedWorkspace[]> {
+  const response = await getAuroraClient().request<{ items?: unknown }>('/api/mcp/workspaces', { method: 'GET' })
+  if (!Array.isArray(response.items)) throw new Error('Invalid granted workspace response')
+  return response.items.map((item) => mapGrantedWorkspace(item))
+}
+
+export function authenticate(): Promise<void>
+export function authenticate(options: AuthenticateOptions): Promise<AuroraConnectionContext>
+export async function authenticate(options: AuthenticateOptions = {}): Promise<AuroraConnectionContext | void> {
+  const client = getAuroraClient()
+  const workspaceId = options.workspaceId ?? process.env['AURORA_WORKSPACE_ID']
+
+  const token = options.token ?? process.env['AURORA_API_TOKEN']
   if (token) {
     client.authStore.save(token, null)
+    if (token.startsWith('aur_mcp_client_')) {
+      const workspaces = await listGrantedWorkspaces()
+      process.stderr.write('AuroraDocs MCP authenticated.\n')
+      return { kind: 'client', workspaces }
+    }
+    if (!workspaceId) throw new Error('AURORA_WORKSPACE_ID environment variable is required for legacy credentials')
   } else {
     const email = process.env['AURORA_API_EMAIL']
     const password = process.env['AURORA_API_PASSWORD']
@@ -192,23 +211,46 @@ export async function authenticate(): Promise<void> {
         'Provide AURORA_API_TOKEN (recommended: workspace MCP token `aur_mcp_...`), or AURORA_API_EMAIL + AURORA_API_PASSWORD for local development only.',
       )
     }
+    if (!workspaceId) throw new Error('AURORA_WORKSPACE_ID environment variable is required for email/password credentials')
   }
 
   await ensureAuthRecord()
 
   // Verify workspace membership
-  if (workspaceId) {
-    const userId = getAuthUserId()
-    if (!userId) throw new Error('Could not determine authenticated user ID')
-    const members = await client.collection('workspace_members').listPage({
-      filter: client.filter('workspace_id = {:wid} && user_id = {:uid}', { wid: workspaceId, uid: userId }),
-      page: 1,
-      perPage: 1,
-    })
-    if (!members.items.length) {
-      throw new Error('Authenticated user is not a member of the configured workspace')
+  const userId = getAuthUserId()
+  if (!userId) throw new Error('Could not determine authenticated user ID')
+  const members = await client.collection('workspace_members').listPage({
+    filter: client.filter('workspace_id = {:wid} && user_id = {:uid}', { wid: workspaceId, uid: userId }),
+    page: 1,
+    perPage: 1,
+  })
+  if (!members.items.length) {
+    throw new Error('Authenticated user is not a member of the configured workspace')
+  }
+  process.stderr.write('AuroraDocs MCP authenticated.\n')
+  return { kind: 'legacy_workspace', defaultWorkspaceId: workspaceId, workspaces: [] }
+}
+
+function mapGrantedWorkspace(value: unknown): GrantedWorkspace {
+  if (!value || typeof value !== 'object') throw new Error('Invalid granted workspace')
+  const item = value as Record<string, unknown>
+  const fields = ['workspaceId', 'alias', 'name', 'role', 'grantId', 'expiresAt'] as const
+  for (const field of fields) {
+    if (typeof item[field] !== 'string' || !(item[field] as string).trim()) {
+      throw new Error('Invalid granted workspace')
     }
-    process.stderr.write('AuroraDocs MCP authenticated.\n')
+  }
+  if (!Array.isArray(item['scopes']) || !item['scopes'].every((scope) => typeof scope === 'string')) {
+    throw new Error('Invalid granted workspace')
+  }
+  return {
+    workspaceId: item['workspaceId'] as string,
+    alias: item['alias'] as string,
+    name: item['name'] as string,
+    role: item['role'] as string,
+    scopes: [...item['scopes']] as string[],
+    grantId: item['grantId'] as string,
+    expiresAt: item['expiresAt'] as string,
   }
 }
 

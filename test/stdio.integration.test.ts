@@ -230,3 +230,71 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
     if (api.listening) await closeServer(api)
   }
 })
+
+test('client credentials discover granted workspaces without a default workspace', async () => {
+  const clientToken = 'aur_mcp_client_stdio_fixture'
+  const requests: string[] = []
+  const api = createServer((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+    requests.push(url.pathname)
+    response.setHeader('content-type', 'application/json')
+    if (request.method === 'GET' && url.pathname === '/api/mcp/workspaces') {
+      response.end(JSON.stringify({ items: [{
+        workspaceId,
+        alias: 'test-space-test',
+        name: 'Test Space',
+        role: 'owner',
+        scopes: ['read:objects'],
+        grantId: 'grant-test',
+        expiresAt: '2026-10-01T00:00:00.000Z',
+      }] }))
+      return
+    }
+    if (request.method === 'GET' && url.pathname === '/api/collections/objects/records') {
+      response.end(JSON.stringify({ items: [], page: 1, perPage: 1, totalPages: 1, totalItems: 0 }))
+      return
+    }
+    response.statusCode = 404
+    response.end(JSON.stringify({ error: 'unexpected route' }))
+  })
+
+  let transport: StdioClientTransport | undefined
+  let client: Client | undefined
+  try {
+    const port = await listen(api)
+    transport = new StdioClientTransport({
+      command: process.execPath,
+      args: ['dist/index.js'],
+      cwd: process.cwd(),
+      env: {
+        ...getDefaultEnvironment(),
+        AURORA_API_URL: `http://127.0.0.1:${port}`,
+        AURORA_API_TOKEN: clientToken,
+      },
+      stderr: 'pipe',
+    })
+    client = new Client({ name: 'auroradocs-mcp-client-credential-test', version: '1.0.0' })
+    await client.connect(transport)
+
+    const listed = await client.callTool({ name: 'list_workspaces', arguments: {} })
+    assert.deepEqual(listed.structuredContent, {
+      type: 'workspaces',
+      workspaces: [{
+        workspaceId,
+        alias: 'test-space-test',
+        name: 'Test Space',
+        role: 'owner',
+        scopes: ['read:objects'],
+        grantId: 'grant-test',
+        expiresAt: '2026-10-01T00:00:00.000Z',
+      }],
+    })
+    const objects = await client.callTool({ name: 'list_objects', arguments: { workspace_alias: 'test-space-test', limit: 1 } })
+    assert.deepEqual(objects.structuredContent, { type: 'objects', objects: [] })
+    assert.deepEqual(requests, ['/api/mcp/workspaces', '/api/collections/objects/records'])
+  } finally {
+    await client?.close().catch(() => undefined)
+    await transport?.close().catch(() => undefined)
+    if (api.listening) await closeServer(api)
+  }
+})

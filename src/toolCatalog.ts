@@ -62,6 +62,7 @@ export type McpWorkflowRecipe = {
 }
 
 const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
+  list_workspaces: 'read',
   search_objects: 'read',
   search: 'read',
   list_objects: 'read',
@@ -322,6 +323,25 @@ const WORKFLOW_RECIPE_SCHEMA: JsonObjectSchema = {
 }
 
 const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
+  list_workspaces: [resultSchema('workspaces', {
+    workspaces: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          workspaceId: stringSchema,
+          alias: stringSchema,
+          name: stringSchema,
+          role: stringSchema,
+          scopes: { type: 'array', items: stringSchema },
+          grantId: stringSchema,
+          expiresAt: stringSchema,
+        },
+        required: ['workspaceId', 'alias', 'name', 'role', 'scopes', 'grantId', 'expiresAt'],
+        additionalProperties: false,
+      },
+    },
+  }, ['workspaces'])],
   search_objects: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
   search: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
   list_objects: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
@@ -397,11 +417,17 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
 }
 
 const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block'])
-const LOCAL_TOOLS = new Set(['list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+const WORKSPACE_SELECTOR_FREE_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
 
 type McpToolDeclaration = Omit<McpToolDefinition, 'title' | 'outputSchema' | 'annotations'>
 
 const TOOL_DEFINITIONS: McpToolDeclaration[] = [
+  {
+    name: 'list_workspaces',
+    description: 'List only the AuroraDocs workspaces granted to this MCP credential.',
+    inputSchema: { type: 'object', properties: {} },
+  },
   {
     name: 'search_objects',
     description: 'Search for objects (pages, notes, tasks, etc.) in the workspace by title keyword.',
@@ -705,7 +731,13 @@ export function getToolDefinitions(): McpToolDefinition[] {
     title: tool.name.split('_').map((word) => word[0]?.toUpperCase() + word.slice(1)).join(' '),
     inputSchema: {
       ...tool.inputSchema,
-      properties: { ...tool.inputSchema.properties },
+      properties: {
+        ...tool.inputSchema.properties,
+        ...(WORKSPACE_SELECTOR_FREE_TOOLS.has(tool.name) ? {} : {
+          workspace_id: { type: 'string', description: 'Granted workspace ID to use for this operation' },
+          workspace_alias: { type: 'string', description: 'Granted workspace alias to use for this operation' },
+        }),
+      },
       required: tool.inputSchema.required ? [...tool.inputSchema.required] : undefined,
     },
     outputSchema: structuredClone({

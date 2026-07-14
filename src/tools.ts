@@ -37,11 +37,12 @@ import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
 import { readBoundedInteger } from './input.js'
 import { ToolInputError, toSafeToolError } from './errors.js'
-import type { Availability, ToolErrorResult } from './contracts.js'
+import type { AuroraConnectionContext, Availability, GrantedWorkspace, ToolErrorResult } from './contracts.js'
 
 // ── Result types ─────────────────────────────────────────────────────────────
 
 export type ToolResult =
+  | { type: 'workspaces'; workspaces: GrantedWorkspace[] }
   | { type: 'objects'; objects: { id: string; title: string | null; type: string; icon: string | null }[] }
   | { type: 'object'; object: { id: string; title: string | null; type: string; icon: string | null }; availability: Availability; content: string | null; properties: Record<string, string> }
   | { type: 'created'; id: string; title: string }
@@ -179,13 +180,54 @@ function normalizePriority(value: string): string | null {
 
 // ── Tool execution ───────────────────────────────────────────────────────────
 
+function normalizeConnectionContext(context: AuroraConnectionContext | string): AuroraConnectionContext {
+  return typeof context === 'string'
+    ? { kind: 'legacy_workspace', defaultWorkspaceId: context, workspaces: [] }
+    : context
+}
+
+export function resolveWorkspace(
+  context: AuroraConnectionContext,
+  input: Record<string, unknown>,
+): string {
+  const workspaceId = readString(input['workspace_id'])
+  const workspaceAlias = readString(input['workspace_alias'])
+  if (workspaceId && workspaceAlias) {
+    throw new ToolInputError('Provide only one of workspace_id or workspace_alias')
+  }
+
+  if (context.kind === 'legacy_workspace') {
+    const selector = workspaceId ?? workspaceAlias
+    if (selector && selector !== context.defaultWorkspaceId) {
+      throw new ToolInputError('Legacy credentials are restricted to the configured workspace')
+    }
+    return context.defaultWorkspaceId
+  }
+
+  if (!workspaceId && !workspaceAlias) {
+    throw new ToolInputError('workspace_id or workspace_alias is required')
+  }
+  const matches = context.workspaces.filter((workspace) => (
+    workspaceId ? workspace.workspaceId === workspaceId : workspace.alias === workspaceAlias
+  ))
+  if (matches.length !== 1) {
+    throw new ToolInputError('Workspace selector does not match an available grant')
+  }
+  return matches[0].workspaceId
+}
+
 export async function executeToolCall(
   name: string,
   input: Record<string, unknown>,
-  workspaceId: string,
+  connection: AuroraConnectionContext | string,
 ): Promise<ToolResult> {
   try {
-    return await executeToolCallUnsafe(name, input, workspaceId)
+    const context = normalizeConnectionContext(connection)
+    if (name === 'list_workspaces') return { type: 'workspaces', workspaces: context.workspaces }
+    if (name === 'get_mcp_tool_coverage' || name === 'get_mcp_workflow_recipes') {
+      return await executeToolCallUnsafe(name, input, context.kind === 'legacy_workspace' ? context.defaultWorkspaceId : '')
+    }
+    return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input))
   } catch (error) {
     return toSafeToolError(error)
   }
@@ -648,6 +690,9 @@ function textToTipTapDoc(text: string): Record<string, unknown> {
 
 export function formatToolResult(result: ToolResult): string {
   switch (result.type) {
+    case 'workspaces':
+      if (!result.workspaces.length) return 'No granted workspaces.'
+      return result.workspaces.map((workspace) => `- ${workspace.name} (${workspace.alias}, ${workspace.workspaceId})`).join('\n')
     case 'objects':
       if (!result.objects.length) return 'No objects found.'
       return result.objects.map((o) => `- [${o.type}] ${o.title ?? '(Untitled)'} (${o.id})`).join('\n')

@@ -26,3 +26,17 @@ export type ToolErrorResult = {
   message: string
   retryable: boolean
 }
+
+export type GrantedWorkspace = {
+  workspaceId: string
+  alias: string
+  name: string
+  role: string
+  scopes: string[]
+  grantId: string
+  expiresAt: string
+}
+
+export type AuroraConnectionContext =
+  | { kind: 'legacy_workspace'; defaultWorkspaceId: string; workspaces: GrantedWorkspace[] }
+  | { kind: 'client'; workspaces: GrantedWorkspace[] }

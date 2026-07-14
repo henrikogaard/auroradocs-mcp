@@ -6,12 +6,9 @@ import {
 import { executeToolCall, toMcpToolCallResult } from './tools.js'
 import { getToolDefinitions } from './toolCatalog.js'
 import { SERVER_VERSION } from './version.js'
+import type { AuroraConnectionContext } from './contracts.js'
 
-export type AuroraMcpServerContext = {
-  workspaceId: string
-}
-
-export function createAuroraMcpServer(context: AuroraMcpServerContext): Server {
+export function createAuroraMcpServer(context: AuroraConnectionContext): Server {
   const server = new Server(
     { name: 'auroradocs-mcp', version: SERVER_VERSION },
     { capabilities: { tools: {} } },
@@ -23,7 +20,7 @@ export function createAuroraMcpServer(context: AuroraMcpServerContext): Server {
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params
-    const result = await executeToolCall(name, (args ?? {}) as Record<string, unknown>, context.workspaceId)
+    const result = await executeToolCall(name, (args ?? {}) as Record<string, unknown>, context)
     return toMcpToolCallResult(result)
   })
 

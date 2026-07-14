@@ -25,20 +25,18 @@ import { createAuroraMcpServer } from './server.js'
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const workspaceId = process.env['AURORA_WORKSPACE_ID']
-  if (!workspaceId) {
-    process.stderr.write('Error: AURORA_WORKSPACE_ID environment variable is required\n')
-    process.exit(1)
-  }
-
+  let context
   try {
-    await authenticate()
+    context = await authenticate({
+      token: process.env['AURORA_API_TOKEN'],
+      workspaceId: process.env['AURORA_WORKSPACE_ID'],
+    })
   } catch {
     process.stderr.write('AuroraDocs MCP authentication failed.\n')
     process.exit(1)
   }
 
-  const server = createAuroraMcpServer({ workspaceId })
+  const server = createAuroraMcpServer(context)
 
   const transport = new StdioServerTransport()
   await server.connect(transport)

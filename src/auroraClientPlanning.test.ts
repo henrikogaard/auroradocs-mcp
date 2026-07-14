@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import {
+  authenticate,
   createPlanningTimeBlock,
   getContent,
   listTaskLists,
@@ -13,6 +14,60 @@ import {
   searchObjectsPage,
 } from './auroraClient.js'
 import { AuroraApiError } from './errors.js'
+
+test('client credential starts without AURORA_WORKSPACE_ID and discovers only granted workspaces', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const requests: string[] = []
+  const server = createServer((req, res) => {
+    requests.push(req.url ?? '')
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({
+      items: [
+        {
+          workspaceId: 'workspace-a1b2',
+          alias: 'henrik-pkm-a1b2',
+          name: 'Henrik PKM',
+          role: 'owner',
+          scopes: ['read:objects', 'write:objects'],
+          grantId: 'grant-1',
+          expiresAt: '2026-10-01T00:00:00.000Z',
+          privateField: 'must not escape',
+        },
+        {
+          workspaceId: 'workspace-c3d4',
+          alias: 'aurora-work-c3d4',
+          name: 'Aurora Work',
+          role: 'editor',
+          scopes: ['read:objects'],
+          grantId: 'grant-2',
+          expiresAt: '2026-09-01T00:00:00.000Z',
+        },
+      ],
+    }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const context = await authenticate({ token: 'aur_mcp_client_fixture', workspaceId: undefined })
+
+    assert.equal(context.kind, 'client')
+    assert.deepEqual(context.workspaces.map((item) => item.alias), ['henrik-pkm-a1b2', 'aurora-work-c3d4'])
+    assert.equal('privateField' in context.workspaces[0], false)
+    assert.deepEqual(requests, ['/api/mcp/workspaces'])
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
 
 test('planning helper exports are callable functions', () => {
   assert.equal(typeof listPlanningTasks, 'function')
