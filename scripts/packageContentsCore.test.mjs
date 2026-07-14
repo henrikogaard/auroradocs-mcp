@@ -4,8 +4,8 @@ import test from 'node:test'
 import { validatePackageManifest } from './packageContentsCore.mjs'
 
 const validManifest = {
-  name: 'auroradocs-mcp',
-  version: '0.1.0',
+  name: '@henrikogaard/auroradocs-mcp',
+  version: '0.1.1',
   bin: { 'aurora-mcp': 'dist/index.js' },
   paths: [
     'package.json',
@@ -22,8 +22,8 @@ test('package manifest accepts the required standalone runtime surface', () => {
 })
 
 for (const [label, mutate] of [
-  ['wrong name', (manifest) => { manifest.name = '@private/mcp' }],
-  ['wrong version', (manifest) => { manifest.version = '0.1.1' }],
+  ['wrong name', (manifest) => { manifest.name = 'auroradocs-mcp' }],
+  ['wrong version', (manifest) => { manifest.version = '0.1.0' }],
   ['wrong executable', (manifest) => { manifest.bin = { 'aurora-mcp': './src/index.ts' } }],
   ['missing required runtime path', (manifest) => { manifest.paths = manifest.paths.filter((path) => path !== 'dist/version.js') }],
   ['forbidden source path', (manifest) => { manifest.paths.push('src/index.ts') }],

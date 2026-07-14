@@ -12,3 +12,13 @@ test('check runs docs contracts and normal NodeNext typechecking', async () => {
   assert.match(pkg.scripts.check, /pnpm typecheck/)
   assert.ok(tsconfig.include.includes('test/**/*'), 'normal typecheck must include stdio integration tests')
 })
+
+test('scoped npm package is configured for public trusted publishing', async () => {
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+  const releaseWorkflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
+
+  assert.equal(pkg.name, '@henrikogaard/auroradocs-mcp')
+  assert.equal(pkg.version, '0.1.1')
+  assert.equal(pkg.publishConfig?.access, 'public')
+  assert.match(releaseWorkflow, /npm publish --provenance --access public/)
+})

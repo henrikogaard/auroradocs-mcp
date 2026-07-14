@@ -1,11 +1,14 @@
 # AuroraDocs MCP Server
 
-`auroradocs-mcp` connects a local MCP client to one AuroraCloud workspace. It
-runs on your computer over stdio and sends authenticated requests to
-`https://api.auroradocs.eu`.
+`@henrikogaard/auroradocs-mcp` connects a local MCP client to one AuroraCloud
+workspace. It runs on your computer over stdio and sends authenticated requests
+to `https://api.auroradocs.eu`.
 
-The public package is `auroradocs-mcp`, the executable is `aurora-mcp`, and
-this documentation targets version `0.1.0`.
+The public package is `@henrikogaard/auroradocs-mcp`, the executable is
+`aurora-mcp`, and this documentation targets version `0.1.1`.
+
+For an end-to-end installation walkthrough, use the dedicated
+[Setup guide](docs/setup.md).
 
 ## Requirements
 
@@ -49,7 +52,7 @@ write scope does not imply its read counterpart.
 | Confirm the connection and list titles | `read:objects` |
 | Read page or Canvas content | `read:objects`, `read:content` |
 | Search and read workspace knowledge | `read:objects`, `read:content`, `search` |
-| Review tasks and week planning | `read:objects`, `tasks` |
+| Review or update tasks and week planning | `read:objects`, `tasks` |
 | Update task metadata after confirmation | `read:objects`, `tasks`, `write:objects` |
 | Create or rename non-task objects | `read:objects`, `write:objects` |
 | Replace or append document content | `read:objects`, `read:content`, `write:content` |
@@ -59,6 +62,9 @@ membership at startup and most tools operate on object metadata. Add
 `write:objects` or `write:content` only when you intend to let the client modify
 the workspace. See the complete [scope and tool reference](docs/tools.md).
 
+The `tasks` scope permits both reading and writing task metadata. Do not grant
+it to a client that should have strictly read-only access.
+
 `search_objects` and its `search` alias search object titles with `read:objects` only.
 `wiki_search` searches workspace knowledge and requires `read:objects` plus `search`.
 Add `read:content` when the workflow will open and read the matching pages, as
@@ -67,8 +73,9 @@ in the knowledge-search recipe above.
 ## Configure a client
 
 All examples below use the production AuroraCloud API and pin package version
-`0.1.0`. Replace `WORKSPACE_ID` and `REDACTED` locally. Do not commit the
-resulting configuration.
+`0.1.1`. Replace `WORKSPACE_ID` and `REDACTED` locally. Do not commit the
+resulting configuration. The examples store the token in the client's saved
+configuration, so protect that file as a credential.
 
 The server requires exactly these environment variables:
 
@@ -91,7 +98,7 @@ this server under `mcpServers`, preserving any servers already present:
   "mcpServers": {
     "auroradocs": {
       "command": "npx",
-      "args": ["-y", "auroradocs-mcp@0.1.0"],
+      "args": ["-y", "@henrikogaard/auroradocs-mcp@0.1.1"],
       "env": {
         "AURORA_API_URL": "https://api.auroradocs.eu",
         "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
@@ -116,7 +123,7 @@ claude mcp add --transport stdio --scope user \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y auroradocs-mcp@0.1.0
+  auroradocs -- npx -y @henrikogaard/auroradocs-mcp@0.1.1
 ```
 
 Run `claude mcp get auroradocs` to inspect the saved entry, then use `/mcp` in
@@ -132,7 +139,7 @@ codex mcp add \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y auroradocs-mcp@0.1.0
+  auroradocs -- npx -y @henrikogaard/auroradocs-mcp@0.1.1
 ```
 
 Run `codex mcp get auroradocs` to inspect the saved entry.
@@ -144,7 +151,7 @@ Use this valid generic JSON shape when a client accepts an MCP server object:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "auroradocs-mcp@0.1.0"],
+  "args": ["-y", "@henrikogaard/auroradocs-mcp@0.1.1"],
   "env": {
     "AURORA_API_URL": "https://api.auroradocs.eu",
     "AURORA_WORKSPACE_ID": "WORKSPACE_ID",

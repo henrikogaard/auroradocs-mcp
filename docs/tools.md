@@ -1,6 +1,6 @@
 # Tools and scopes
 
-AuroraDocs MCP 0.1.0 exposes the tools below to a connected client. Every call
+AuroraDocs MCP 0.1.1 exposes the tools below to a connected client. Every call
 is limited to the workspace in `AURORA_WORKSPACE_ID`.
 
 ## Scope catalog
