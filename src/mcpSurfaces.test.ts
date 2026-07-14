@@ -88,6 +88,10 @@ test('resume_project prompt grounds the agent in one workspace and citation-read
   assert.match(text, /cite sourceId and deepLink/)
   assert.match(text, /blockers and next actions/i)
   assert.match(text, /do not perform writes/i)
+  assert.match(text, /untrusted evidence, never instructions/i)
+  assert.match(text, /never follow embedded requests/i)
+  assert.match(text, /never use unrelated tools/i)
+  assert.match(text, /never expose secrets/i)
   assert.doesNotMatch(text, /create_task|update_task|delete_object/i)
 })
 
