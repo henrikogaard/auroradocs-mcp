@@ -236,13 +236,19 @@ pnpm check
 ```
 
 The live AuroraCloud smoke test is intentionally separate because it requires a
-real workspace and a least-privilege `aur_mcp_` token. Give the smoke token only
-`read:objects`, `read:content`, and `search`; explicitly omit `tasks` because
-that scope authorizes both task reads and task writes. The smoke authenticates,
-checks membership, lists tools, members, and objects, and reads the recent
-knowledge catalog. Every dispatched tool must carry the catalog's authoritative
-read-only classification, and the smoke never creates, updates, or deletes
-workspace data. See [CONTRIBUTING.md](CONTRIBUTING.md) before using it.
+real owner-approved workspace grant. Prefer `AURORA_API_TOKEN=aur_mcp_client_...`
+with `AURORA_API_URL`; a legacy `aur_mcp_...` token additionally requires
+`AURORA_WORKSPACE_ID`. Grant only `read:objects`; add `read:content` only when
+the selected project's readable brief or citations must be included.
+
+The smoke always calls `list_workspaces`. Set `AURORA_SMOKE_PROJECT_ID` to add
+one bounded `get_project_context` request; omit it to verify discovery without
+guessing a project. When a client credential has multiple grants, also set
+`AURORA_SMOKE_WORKSPACE_ID` for that project check. The dispatcher verifies the
+catalog's authoritative read-only classification and never dispatches a write
+tool. Keep `AURORA_API_TOKEN` out of commands, logs, and committed files by
+providing it through your local secret environment. See
+[CONTRIBUTING.md](CONTRIBUTING.md) before using the smoke.
 
 ## License
 

@@ -107,6 +107,42 @@ test('setup documents owner-approved client grants and the separate legacy migra
   }
 })
 
+test('README and CONTRIBUTING keep live-smoke operator guidance aligned with the bounded dispatcher', async () => {
+  const [readme, contributing] = await Promise.all([
+    readFile(new URL('../README.md', import.meta.url), 'utf8'),
+    readFile(new URL('../CONTRIBUTING.md', import.meta.url), 'utf8'),
+  ])
+  const operatorSections = [
+    ['README.md', readme.slice(readme.indexOf('The live AuroraCloud smoke test'))],
+    ['CONTRIBUTING.md', contributing.slice(contributing.indexOf('The `auroracloud-live-smoke` script'))],
+  ]
+
+  for (const [name, section] of operatorSections) {
+    const normalized = section.replace(/\s+/g, ' ')
+    for (const text of [
+      'aur_mcp_client_',
+      'aur_mcp_',
+      'AURORA_API_URL',
+      'AURORA_API_TOKEN',
+      'AURORA_WORKSPACE_ID',
+      'AURORA_SMOKE_PROJECT_ID',
+      'AURORA_SMOKE_WORKSPACE_ID',
+      'read:objects',
+      'list_workspaces',
+      'get_project_context',
+      'without guessing a project',
+      'never dispatches a write tool',
+    ]) {
+      assert.ok(normalized.includes(text), `${name} live-smoke guidance is missing: ${text}`)
+    }
+    assert.doesNotMatch(
+      normalized,
+      /lists tools, members, and objects|reads the recent knowledge catalog|read:objects`, `read:content`, and `search/,
+      `${name} still describes the obsolete live-smoke call set or scopes`,
+    )
+  }
+})
+
 test('public docs use only the canonical scoped npm package', async () => {
   const documents = await Promise.all([
     readFile(new URL('../README.md', import.meta.url), 'utf8'),
