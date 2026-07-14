@@ -85,6 +85,64 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
   assert.equal(getToolEffect('unknown_tool'), undefined)
 })
 
+test('every tool declares output schema and accurate effect annotations', () => {
+  const localReadTools = new Set(['list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+  const nonIdempotentTools = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block'])
+  const successResultTypes: Record<string, string[]> = {
+    search_objects: ['objects'],
+    search: ['objects'],
+    list_objects: ['objects'],
+    list_recent: ['objects'],
+    wiki_search: ['knowledge_sources'],
+    wiki_get_page: ['knowledge_sources'],
+    wiki_related: ['knowledge_sources'],
+    wiki_recent: ['knowledge_sources'],
+    get_object: ['object'],
+    list_workspace_members: ['members'],
+    list_task_lists: ['task_lists'],
+    list_task_statuses: ['task_statuses'],
+    list_week_plan: ['week_plan'],
+    schedule_task_block: ['scheduled_task_block'],
+    read_canvas: ['canvas'],
+    get_mcp_tool_coverage: ['mcp_tool_coverage'],
+    get_mcp_workflow_recipes: ['mcp_workflow_recipes'],
+    create_object: ['created'],
+    create_task: ['task_created'],
+    update_task: ['task_updated'],
+    update_object_title: ['updated'],
+    update_object: ['object_updated', 'no_op'],
+    set_content: ['content_set'],
+    append_block: ['content_appended'],
+    set_property: ['property_set'],
+    delete_object: ['deleted'],
+  }
+
+  for (const tool of getToolDefinitions()) {
+    const isReadOnly = getToolEffect(tool.name) === 'read'
+
+    assert.equal(typeof tool.title, 'string', `${tool.name} must declare a title`)
+    assert.equal(tool.outputSchema.type, 'object', `${tool.name} must declare an object output schema`)
+    assert.equal(typeof tool.annotations.readOnlyHint, 'boolean')
+    assert.equal(typeof tool.annotations.destructiveHint, 'boolean')
+    assert.equal(typeof tool.annotations.idempotentHint, 'boolean')
+    assert.equal(typeof tool.annotations.openWorldHint, 'boolean')
+    assert.equal(tool.annotations.readOnlyHint, isReadOnly, `${tool.name} readOnlyHint`)
+    assert.equal(tool.annotations.destructiveHint, tool.name === 'delete_object', `${tool.name} destructiveHint`)
+    assert.equal(tool.annotations.idempotentHint, !nonIdempotentTools.has(tool.name), `${tool.name} idempotentHint`)
+    assert.equal(tool.annotations.openWorldHint, !localReadTools.has(tool.name), `${tool.name} openWorldHint`)
+
+    const variants = tool.outputSchema.oneOf ?? []
+    assert.ok(variants.some((variant) => variant.properties?.['type']?.const === 'error'), `${tool.name} must accept safe errors`)
+    assert.deepEqual(
+      variants
+        .map((variant) => variant.properties?.['type']?.const)
+        .filter((type) => type !== 'error'),
+      successResultTypes[tool.name],
+      `${tool.name} success result variants`,
+    )
+  }
+})
+
 test('MCP tool catalog declares bounded integer schemas for count inputs', () => {
   const definitions = new Map(getToolDefinitions().map((tool) => [tool.name, tool]))
   const property = (tool: string, key: string) =>

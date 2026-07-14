@@ -1,10 +1,35 @@
+type JsonSchema = {
+  type?: string | string[]
+  const?: string
+  enum?: string[]
+  description?: string
+  minimum?: number
+  maximum?: number
+  properties?: Record<string, JsonSchema>
+  required?: string[]
+  items?: JsonSchema
+  oneOf?: JsonSchema[]
+  additionalProperties?: boolean | JsonSchema
+}
+
+export type JsonObjectSchema = JsonSchema & {
+  type: 'object'
+  properties: Record<string, JsonSchema>
+  required?: string[]
+  oneOf?: JsonObjectSchema[]
+}
+
 export type McpToolDefinition = {
   name: string
+  title: string
   description: string
-  inputSchema: {
-    type: 'object'
-    properties: Record<string, unknown>
-    required?: string[]
+  inputSchema: JsonObjectSchema
+  outputSchema: JsonObjectSchema
+  annotations: {
+    readOnlyHint: boolean
+    destructiveHint: boolean
+    idempotentHint: boolean
+    openWorldHint: boolean
   }
 }
 
@@ -65,7 +90,318 @@ const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
   delete_object: 'write',
 }
 
-const TOOL_DEFINITIONS: McpToolDefinition[] = [
+const stringSchema: JsonSchema = { type: 'string' }
+const nullableStringSchema: JsonSchema = { type: ['string', 'null'] }
+
+function resultSchema(
+  type: string,
+  properties: Record<string, JsonSchema> = {},
+  required: string[] = [],
+): JsonObjectSchema {
+  return {
+    type: 'object',
+    properties: { type: { const: type }, ...properties },
+    required: ['type', ...required],
+    additionalProperties: false,
+  }
+}
+
+const SAFE_ERROR_SCHEMA = resultSchema('error', {
+  code: {
+    type: 'string',
+    enum: ['invalid_input', 'authentication_failed', 'permission_denied', 'not_found', 'rate_limited', 'network_error', 'server_error'],
+  },
+  message: stringSchema,
+  retryable: { type: 'boolean' },
+}, ['code', 'message', 'retryable'])
+
+const OBJECT_SUMMARY_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    id: stringSchema,
+    title: nullableStringSchema,
+    type: stringSchema,
+    icon: nullableStringSchema,
+  },
+  required: ['id', 'title', 'type', 'icon'],
+  additionalProperties: false,
+}
+
+const KNOWLEDGE_SOURCE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    sourceId: stringSchema,
+    workspaceId: stringSchema,
+    objectId: stringSchema,
+    kind: { type: 'string', enum: ['object', 'content_chunk', 'property', 'comment', 'attachment_metadata', 'relationship'] },
+    title: nullableStringSchema,
+    objectType: stringSchema,
+    icon: nullableStringSchema,
+    breadcrumb: { type: 'array', items: stringSchema },
+    deepLink: stringSchema,
+    snippet: nullableStringSchema,
+    plainText: nullableStringSchema,
+    blockId: nullableStringSchema,
+    updatedAt: stringSchema,
+    score: { type: ['number', 'null'] },
+    matchedFields: { type: 'array', items: { type: 'string', enum: ['title', 'content', 'properties', 'relationships'] } },
+    availability: { type: 'string', enum: ['available', 'encrypted_locked', 'not_indexed', 'unsupported_type', 'permission_denied'] },
+    relationships: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['parent', 'child', 'link', 'backlink', 'tag', 'task_project'] },
+          objectId: stringSchema,
+          title: nullableStringSchema,
+        },
+        required: ['type', 'objectId', 'title'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [
+    'sourceId', 'workspaceId', 'objectId', 'kind', 'title', 'objectType', 'icon', 'breadcrumb',
+    'deepLink', 'snippet', 'plainText', 'blockId', 'updatedAt', 'score', 'matchedFields',
+    'availability', 'relationships',
+  ],
+  additionalProperties: false,
+}
+
+const WEEK_PLAN_TASK_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    id: stringSchema,
+    title: nullableStringSchema,
+    status: nullableStringSchema,
+    due_date: nullableStringSchema,
+    updated_at: nullableStringSchema,
+    labels: { type: 'array', items: stringSchema },
+    timeBlock: {
+      type: 'object',
+      properties: { isTimeBlock: { type: 'boolean' }, durationMinutes: { type: ['number', 'null'] } },
+      required: ['isTimeBlock', 'durationMinutes'],
+      additionalProperties: false,
+    },
+  },
+  required: ['id', 'title', 'status', 'due_date', 'updated_at', 'labels', 'timeBlock'],
+  additionalProperties: false,
+}
+
+const WEEK_PLAN_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    type: { const: 'week_plan' },
+    range: {
+      type: 'object',
+      properties: { start: stringSchema, end: stringSchema },
+      required: ['start', 'end'],
+      additionalProperties: false,
+    },
+    days: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { date: stringSchema, tasks: { type: 'array', items: WEEK_PLAN_TASK_SCHEMA } },
+        required: ['date', 'tasks'],
+        additionalProperties: false,
+      },
+    },
+    unscheduled: { type: 'array', items: WEEK_PLAN_TASK_SCHEMA },
+  },
+  required: ['type', 'range', 'days', 'unscheduled'],
+  additionalProperties: false,
+}
+
+const CANVAS_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    type: { const: 'canvas' },
+    canvas: {
+      type: 'object',
+      properties: { id: stringSchema, title: nullableStringSchema },
+      required: ['id', 'title'],
+      additionalProperties: false,
+    },
+    cards: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: stringSchema,
+          type: stringSchema,
+          x: { type: ['number', 'null'] },
+          y: { type: ['number', 'null'] },
+          width: { type: ['number', 'null'] },
+          height: { type: ['number', 'null'] },
+          text: nullableStringSchema,
+          color: nullableStringSchema,
+          objectId: nullableStringSchema,
+          objectTitle: nullableStringSchema,
+        },
+        required: ['id', 'type', 'x', 'y', 'width', 'height', 'text', 'color', 'objectId', 'objectTitle'],
+        additionalProperties: false,
+      },
+    },
+    edges: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: stringSchema,
+          fromCard: nullableStringSchema,
+          toCard: nullableStringSchema,
+          fromSide: nullableStringSchema,
+          toSide: nullableStringSchema,
+          label: nullableStringSchema,
+          color: nullableStringSchema,
+          style: nullableStringSchema,
+          arrow: nullableStringSchema,
+          arrowMode: nullableStringSchema,
+          strokeWidth: { type: ['number', 'null'] },
+        },
+        required: ['id', 'fromCard', 'toCard', 'fromSide', 'toSide', 'label', 'color', 'style', 'arrow', 'arrowMode', 'strokeWidth'],
+        additionalProperties: false,
+      },
+    },
+    frames: { type: 'array', items: { type: 'object' } },
+    warnings: { type: 'array', items: stringSchema },
+  },
+  required: ['type', 'canvas', 'cards', 'edges', 'frames', 'warnings'],
+  additionalProperties: false,
+}
+
+const COVERAGE_AUDIT_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    generatedAt: stringSchema,
+    areas: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: stringSchema,
+          label: stringSchema,
+          status: { type: 'string', enum: ['covered', 'partial', 'gap'] },
+          implementedTools: { type: 'array', items: stringSchema },
+          missingTools: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: stringSchema,
+                priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+                reason: stringSchema,
+              },
+              required: ['name', 'priority', 'reason'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['id', 'label', 'status', 'implementedTools', 'missingTools'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['generatedAt', 'areas'],
+  additionalProperties: false,
+}
+
+const WORKFLOW_RECIPE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    id: stringSchema,
+    title: stringSchema,
+    goal: stringSchema,
+    requiredScopes: { type: 'array', items: stringSchema },
+    toolSteps: { type: 'array', items: stringSchema },
+    prompt: stringSchema,
+  },
+  required: ['id', 'title', 'goal', 'requiredScopes', 'toolSteps', 'prompt'],
+  additionalProperties: false,
+}
+
+const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
+  search_objects: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
+  search: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
+  list_objects: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
+  list_recent: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
+  wiki_search: [resultSchema('knowledge_sources', { sources: { type: 'array', items: KNOWLEDGE_SOURCE_SCHEMA } }, ['sources'])],
+  wiki_get_page: [resultSchema('knowledge_sources', { sources: { type: 'array', items: KNOWLEDGE_SOURCE_SCHEMA } }, ['sources'])],
+  wiki_related: [resultSchema('knowledge_sources', { sources: { type: 'array', items: KNOWLEDGE_SOURCE_SCHEMA } }, ['sources'])],
+  wiki_recent: [resultSchema('knowledge_sources', { sources: { type: 'array', items: KNOWLEDGE_SOURCE_SCHEMA } }, ['sources'])],
+  get_object: [resultSchema('object', {
+    object: OBJECT_SUMMARY_SCHEMA,
+    availability: { type: 'string', enum: ['available', 'empty', 'encrypted_locked', 'permission_denied', 'not_found', 'unavailable'] },
+    content: nullableStringSchema,
+    properties: { type: 'object', additionalProperties: stringSchema },
+  }, ['object', 'availability', 'content', 'properties'])],
+  list_workspace_members: [resultSchema('members', {
+    members: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: stringSchema, name: nullableStringSchema, email: stringSchema, role: stringSchema },
+        required: ['id', 'name', 'email', 'role'],
+        additionalProperties: false,
+      },
+    },
+  }, ['members'])],
+  list_task_lists: [resultSchema('task_lists', {
+    task_lists: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: stringSchema, name: stringSchema },
+        required: ['id', 'name'],
+        additionalProperties: false,
+      },
+    },
+  }, ['task_lists'])],
+  list_task_statuses: [resultSchema('task_statuses', { statuses: { type: 'array', items: stringSchema } }, ['statuses'])],
+  list_week_plan: [resultSchema('week_plan', { plan: WEEK_PLAN_SCHEMA }, ['plan'])],
+  schedule_task_block: [resultSchema('scheduled_task_block', {
+    id: stringSchema,
+    title: nullableStringSchema,
+    due_date: stringSchema,
+    mode: stringSchema,
+  }, ['id', 'title', 'due_date', 'mode'])],
+  read_canvas: [resultSchema('canvas', { canvas: CANVAS_SCHEMA }, ['canvas'])],
+  get_mcp_tool_coverage: [resultSchema('mcp_tool_coverage', { audit: COVERAGE_AUDIT_SCHEMA }, ['audit'])],
+  get_mcp_workflow_recipes: [resultSchema('mcp_workflow_recipes', { recipes: { type: 'array', items: WORKFLOW_RECIPE_SCHEMA } }, ['recipes'])],
+  create_object: [resultSchema('created', { id: stringSchema, title: stringSchema }, ['id', 'title'])],
+  create_task: [resultSchema('task_created', {
+    id: stringSchema,
+    title: stringSchema,
+    status: nullableStringSchema,
+    task_list_name: nullableStringSchema,
+  }, ['id', 'title', 'status', 'task_list_name'])],
+  update_task: [resultSchema('task_updated', {
+    id: stringSchema,
+    title: stringSchema,
+    changed_fields: { type: 'array', items: stringSchema },
+  }, ['id', 'title', 'changed_fields'])],
+  update_object_title: [resultSchema('updated', { id: stringSchema, title: stringSchema }, ['id', 'title'])],
+  update_object: [
+    resultSchema('object_updated', { id: stringSchema, changed_fields: { type: 'array', items: stringSchema } }, ['id', 'changed_fields']),
+    resultSchema('no_op', { message: stringSchema }, ['message']),
+  ],
+  set_content: [resultSchema('content_set', { id: stringSchema }, ['id'])],
+  append_block: [resultSchema('content_appended', { id: stringSchema }, ['id'])],
+  set_property: [resultSchema('property_set', {
+    objectId: stringSchema,
+    key: stringSchema,
+    value: stringSchema,
+  }, ['objectId', 'key', 'value'])],
+  delete_object: [resultSchema('deleted', { id: stringSchema }, ['id'])],
+}
+
+const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block'])
+const LOCAL_TOOLS = new Set(['list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+
+type McpToolDeclaration = Omit<McpToolDefinition, 'title' | 'outputSchema' | 'annotations'>
+
+const TOOL_DEFINITIONS: McpToolDeclaration[] = [
   {
     name: 'search_objects',
     description: 'Search for objects (pages, notes, tasks, etc.) in the workspace by title keyword.',
@@ -366,10 +702,22 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
 export function getToolDefinitions(): McpToolDefinition[] {
   return TOOL_DEFINITIONS.map((tool) => ({
     ...tool,
+    title: tool.name.split('_').map((word) => word[0]?.toUpperCase() + word.slice(1)).join(' '),
     inputSchema: {
       ...tool.inputSchema,
       properties: { ...tool.inputSchema.properties },
       required: tool.inputSchema.required ? [...tool.inputSchema.required] : undefined,
+    },
+    outputSchema: structuredClone({
+      type: 'object' as const,
+      properties: {},
+      oneOf: [...(RESULT_SCHEMAS[tool.name] ?? []), SAFE_ERROR_SCHEMA],
+    }),
+    annotations: {
+      readOnlyHint: TOOL_EFFECTS[tool.name] === 'read',
+      destructiveHint: tool.name === 'delete_object',
+      idempotentHint: !NON_IDEMPOTENT_TOOLS.has(tool.name),
+      openWorldHint: !LOCAL_TOOLS.has(tool.name),
     },
   }))
 }

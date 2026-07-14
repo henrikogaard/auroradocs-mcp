@@ -65,6 +65,12 @@ export type ToolResult =
   | { type: 'no_op'; message: string }
   | ToolErrorResult
 
+export type McpToolCallResult = {
+  content: [{ type: 'text'; text: string }]
+  structuredContent: ToolResult
+  isError: boolean
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function readString(value: unknown): string | null {
@@ -765,5 +771,13 @@ export function formatToolResult(result: ToolResult): string {
       return result.message
     case 'error':
       return `Error: ${result.message}`
+  }
+}
+
+export function toMcpToolCallResult(result: ToolResult): McpToolCallResult {
+  return {
+    content: [{ type: 'text', text: formatToolResult(result) }],
+    structuredContent: result,
+    isError: result.type === 'error',
   }
 }

@@ -18,16 +18,9 @@
  *   AURORA_API_EMAIL     AuroraCloud user email (legacy/dev fallback)
  *   AURORA_API_PASSWORD  AuroraCloud user password (legacy/dev fallback)
  */
-import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js'
 import { authenticate } from './auroraClient.js'
-import { executeToolCall, formatToolResult } from './tools.js'
-import { getToolDefinitions } from './toolCatalog.js'
-import { SERVER_VERSION } from './version.js'
+import { createAuroraMcpServer } from './server.js'
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 
@@ -45,28 +38,11 @@ async function main() {
     process.exit(1)
   }
 
-  const server = new Server(
-    { name: 'auroradocs-mcp', version: SERVER_VERSION },
-    { capabilities: { tools: {} } },
-  )
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: getToolDefinitions(),
-  }))
-
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params
-    const result = await executeToolCall(name, (args ?? {}) as Record<string, unknown>, workspaceId)
-    const text = formatToolResult(result)
-    return {
-      content: [{ type: 'text', text }],
-      isError: result.type === 'error',
-    }
-  })
+  const server = createAuroraMcpServer({ workspaceId })
 
   const transport = new StdioServerTransport()
   await server.connect(transport)
-  process.stderr.write(`AuroraDocs MCP server running (workspace: ${workspaceId})\n`)
+  process.stderr.write('AuroraDocs MCP server running.\n')
 }
 
 main().catch((err) => {
