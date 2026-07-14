@@ -1,14 +1,15 @@
 # AuroraDocs MCP Server
 
-`@henrikogard/auroradocs-mcp` connects a local MCP client to one AuroraCloud
-workspace. It runs on your computer over stdio and sends authenticated requests
-to `https://api.auroradocs.eu`.
+`@henrikogard/auroradocs-mcp` connects a local MCP client to independently
+granted AuroraCloud workspaces. It runs on your computer over stdio and sends
+authenticated requests to `https://api.auroradocs.eu`.
 
 The public package is `@henrikogard/auroradocs-mcp`, the executable is
 `aurora-mcp`, and this documentation targets version `0.1.1`.
 
 For an end-to-end installation walkthrough, use the dedicated
-[Setup guide](docs/setup.md).
+[Setup guide](docs/setup.md). Hermes and OpenClaw users should also apply the
+bounded [read-only agent profiles](docs/agent-profiles.md).
 
 ## Requirements
 
@@ -21,7 +22,14 @@ For an end-to-end installation walkthrough, use the dedicated
 Browser-only workspaces and Local folders workspaces are not supported. The
 server does not read a browser tab or a folder on your computer.
 
-## Create an MCP key
+## Create an MCP credential
+
+New multi-workspace installations should use an `aur_mcp_client_` credential
+with owner-approved, independently revocable workspace grants. Follow the
+[Setup guide](docs/setup.md) for that flow. The workspace-scoped `aur_mcp_`
+steps below remain available during the legacy migration window.
+
+### Legacy workspace token
 
 1. Sign in to AuroraDocs and open the AuroraCloud workspace you want to use.
 2. Go to **Settings → Workspace → MCP Access**.
@@ -72,18 +80,22 @@ in the knowledge-search recipe above.
 
 ## Configure a client
 
-All examples below use the production AuroraCloud API and pin package version
-`0.1.1`. Replace `WORKSPACE_ID` and `REDACTED` locally. Do not commit the
+All examples below use the production AuroraCloud API, a new client credential,
+and package version `0.1.1`. Replace `REDACTED` locally. Do not commit the
 resulting configuration. The examples store the token in the client's saved
 configuration, so protect that file as a credential.
 
-The server requires exactly these environment variables:
+New client credentials require these environment variables:
 
 | Variable | Value |
 | --- | --- |
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
-| `AURORA_WORKSPACE_ID` | the workspace ID shown on the MCP Access page |
-| `AURORA_API_TOKEN` | the one-time `aur_mcp_` token |
+| `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
+
+Do not set `AURORA_WORKSPACE_ID` for a client credential. The server discovers
+only its owner-approved grants with `list_workspaces`; each data call then
+selects a workspace explicitly. A legacy `aur_mcp_` token still requires
+`AURORA_WORKSPACE_ID` during the migration window.
 
 Do not configure an AuroraDocs email or password. Public onboarding supports
 MCP-token authentication only.
@@ -101,7 +113,6 @@ this server under `mcpServers`, preserving any servers already present:
       "args": ["-y", "@henrikogard/auroradocs-mcp@0.1.1"],
       "env": {
         "AURORA_API_URL": "https://api.auroradocs.eu",
-        "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
         "AURORA_API_TOKEN": "REDACTED"
       }
     }
@@ -121,7 +132,6 @@ Options must appear before the server name:
 ```bash
 claude mcp add --transport stdio --scope user \
   --env AURORA_API_URL=https://api.auroradocs.eu \
-  --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
   auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.1.1
 ```
@@ -137,7 +147,6 @@ The installed Codex CLI accepts `--env` for local stdio servers:
 ```bash
 codex mcp add \
   --env AURORA_API_URL=https://api.auroradocs.eu \
-  --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
   auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.1.1
 ```
@@ -154,7 +163,6 @@ Use this valid generic JSON shape when a client accepts an MCP server object:
   "args": ["-y", "@henrikogard/auroradocs-mcp@0.1.1"],
   "env": {
     "AURORA_API_URL": "https://api.auroradocs.eu",
-    "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
     "AURORA_API_TOKEN": "REDACTED"
   }
 }
@@ -166,13 +174,13 @@ local server calls, not a hosted MCP endpoint.
 
 ## Verify read-only access first
 
-1. Mint a token with only `read:objects`.
+1. Grant the client one workspace with only `read:objects`.
 2. Start or restart the client.
-3. Ask the client to call `list_objects` with a small limit and return only
-   object titles and IDs.
-4. Confirm that the result belongs to the intended workspace.
-5. Only then mint a replacement token with any additional scopes your workflow
-   genuinely needs. Update the client, verify it, and revoke the first token.
+3. Ask the client to call `list_workspaces` and confirm only the expected grant
+   is visible.
+4. Call `get_project_context` for one explicit workspace and project ID.
+5. Only then extend that workspace grant with any optional read scopes the
+   workflow genuinely needs.
 
 If the connection fails, see [Troubleshooting](docs/troubleshooting.md). Never
 paste the raw token into logs or bug reports.
@@ -212,6 +220,7 @@ report a vulnerability, follow [SECURITY.md](SECURITY.md).
 ## Reference
 
 - [Tools and scopes](docs/tools.md)
+- [Hermes and OpenClaw agent profiles](docs/agent-profiles.md)
 - [Agent planning and knowledge roadmap](docs/agent-planning-knowledge-roadmap.md)
 - [Security boundaries](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)

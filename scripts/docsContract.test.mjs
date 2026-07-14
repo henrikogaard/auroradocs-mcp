@@ -59,6 +59,54 @@ test('dedicated setup guide covers keys, clients, verification, and revocation',
   }
 })
 
+test('agent profiles document bounded read-only Hermes and OpenClaw resume workflows', async () => {
+  const profiles = await readFile(new URL('../docs/agent-profiles.md', import.meta.url), 'utf8')
+  const normalizedProfiles = profiles.replace(/\s+/g, ' ')
+
+  for (const text of [
+    'Hermes',
+    'OpenClaw',
+    'list_workspaces',
+    'get_project_context',
+    'list_project_changes',
+    'wiki_search',
+    'wiki_get_page',
+    'wiki_related',
+    'resume_project',
+    'aurora://workspaces/{workspaceId}/projects/{projectId}/context',
+    'Parallel reads are safe because every request selects an explicit workspace.',
+    'Serialize future writes',
+    'change cursor',
+    'Never expose the raw credential to prompts, logs, or committed configuration.',
+    'Do not enable write tools in the resume profile.',
+  ]) {
+    assert.ok(normalizedProfiles.includes(text), `docs/agent-profiles.md is missing required guidance: ${text}`)
+  }
+})
+
+test('setup documents owner-approved client grants and the separate legacy migration path', async () => {
+  const setup = await readFile(new URL('../docs/setup.md', import.meta.url), 'utf8')
+
+  for (const text of [
+    'aur_mcp_client_',
+    'owner-approved',
+    'Enable MCP access',
+    'Register client',
+    'shown only once',
+    'grant each workspace independently',
+    'read:objects',
+    'list_workspaces',
+    'get_project_context',
+    'revoke the workspace grant',
+    'revoke the client',
+    'Legacy workspace token migration window',
+    'AURORA_WORKSPACE_ID',
+    'aur_mcp_',
+  ]) {
+    assert.ok(setup.includes(text), `docs/setup.md is missing client-grant guidance: ${text}`)
+  }
+})
+
 test('public docs use only the canonical scoped npm package', async () => {
   const documents = await Promise.all([
     readFile(new URL('../README.md', import.meta.url), 'utf8'),
