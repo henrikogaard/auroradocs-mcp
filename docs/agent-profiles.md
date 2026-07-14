@@ -20,6 +20,11 @@ object, content, task, scheduling, property, or deletion tools merely because
 the client can discover them. A separate future write profile should require an
 explicit approval boundary and narrower grants.
 
+For a complete resume packet, grant `read:objects`, `read:content`,
+`read:tasks`, and `search`. With only `read:objects`, the project identity and
+metadata remain available while content, task, or search-backed sections report
+their permission state. Do not add `write:tasks` to this read-only profile.
+
 The same profile applies to both clients:
 
 | Client | Recommended use |

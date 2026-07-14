@@ -56,8 +56,8 @@ including object lookup and startup membership verification.
 | `get_mcp_workflow_recipes` | Return built-in workflow recipes and their scopes. | `read:objects` startup baseline |
 | `list_week_plan` | Read the Monday-start planning week and optional unscheduled tasks. | `read:objects`, `read:tasks` |
 | `read_canvas` | Read Canvas cards, edges, references, frames, and warnings. | `read:objects`, `read:content` |
-| `get_project_context` | Load a bounded, citation-ready project resume packet. | `read:objects`, `read:tasks` |
-| `list_project_changes` | Read bounded project changes after a required cursor. | `read:objects`, `read:tasks` |
+| `get_project_context` | Load a bounded, citation-ready project resume packet. | `read:objects`; add `read:content`, `read:tasks`, and `search` for all optional sections |
+| `list_project_changes` | Read bounded project changes after a required cursor. | `read:objects` |
 | `schedule_task_block` | Schedule a task or create a task-backed time block. | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
 | `create_object` | Create a non-task object. | `read:objects`, `write:objects` |
 | `create_task` | Create a task and its task properties. | `read:objects`, `write:tasks`, `write:objects` |

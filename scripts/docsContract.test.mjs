@@ -96,6 +96,7 @@ test('agent profiles document bounded read-only Hermes and OpenClaw resume workf
     'Never expose the raw credential to prompts, logs, or committed configuration.',
     'Do not enable write tools in the resume profile.',
     'When `nextCursor` is `null`, retain the previous cursor; do not overwrite it with `null`.',
+    'For a complete resume packet, grant `read:objects`, `read:content`, `read:tasks`, and `search`.',
   ]) {
     assert.ok(normalizedProfiles.includes(text), `docs/agent-profiles.md is missing required guidance: ${text}`)
   }
