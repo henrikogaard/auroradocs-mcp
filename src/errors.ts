@@ -19,6 +19,13 @@ export class ToolInputError extends Error {
   }
 }
 
+export class ToolNotFoundError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ToolNotFoundError'
+  }
+}
+
 const PUBLIC_ERROR_MESSAGES: Record<Exclude<ToolErrorCode, 'rate_limited'>, string> = {
   invalid_input: 'AuroraCloud rejected the request.',
   authentication_failed: 'AuroraCloud authentication failed.',
@@ -76,6 +83,15 @@ export function toSafeToolError(error: unknown): ToolErrorResult {
     return {
       type: 'error',
       code: 'invalid_input',
+      message: error.message,
+      retryable: false,
+    }
+  }
+
+  if (error instanceof ToolNotFoundError) {
+    return {
+      type: 'error',
+      code: 'not_found',
       message: error.message,
       retryable: false,
     }

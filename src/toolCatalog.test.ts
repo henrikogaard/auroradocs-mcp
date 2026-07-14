@@ -162,6 +162,49 @@ test('read_canvas validates required id before reading workspace content', async
   })
 })
 
+test('read_canvas classifies a non-canvas object as invalid input', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const server = createServer((_req, res) => {
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({
+      id: 'page-1',
+      workspace_id: 'workspace-1',
+      type: 'page',
+      title: 'Not a canvas',
+      icon: null,
+      parent_id: null,
+      is_deleted: false,
+      is_template: false,
+      created_at: '2026-07-01T10:00:00Z',
+      updated_at: '2026-07-01T12:00:00Z',
+    }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const result = await executeToolCall('read_canvas', { id: 'page-1' }, 'workspace-1')
+
+    assert.deepEqual(result, {
+      type: 'error',
+      code: 'invalid_input',
+      message: 'page-1 is not a canvas',
+      retryable: false,
+    })
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
 test('read_canvas reads canvas content and can omit card text', async () => {
   const previousApiUrl = process.env['AURORA_API_URL']
   const server = createServer((req, res) => {
@@ -367,6 +410,47 @@ test('dispatcher does not expose malformed content JSON excerpts', async () => {
       retryable: false,
     })
     assert.doesNotMatch(JSON.stringify(result), new RegExp(privateFixture))
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
+test('write tools classify missing objects as not found', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const server = createServer((_req, res) => {
+    res.statusCode = 404
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ code: 'not_found', message: 'private upstream detail' }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ['update_object_title', { id: 'missing-1', title: 'New title' }],
+      ['set_content', { id: 'missing-1', text: 'New content' }],
+      ['append_block', { id: 'missing-1', text: 'Appended content' }],
+      ['delete_object', { id: 'missing-1' }],
+      ['set_property', { object_id: 'missing-1', key: 'status', value: 'Todo' }],
+    ]
+
+    for (const [name, input] of calls) {
+      assert.deepEqual(await executeToolCall(name, input, 'workspace-1'), {
+        type: 'error',
+        code: 'not_found',
+        message: 'Object missing-1 not found in this workspace',
+        retryable: false,
+      })
+    }
   } finally {
     if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
     else process.env['AURORA_API_URL'] = previousApiUrl

@@ -6,7 +6,7 @@
  * that workspace — if not, the process exits.
  */
 import type { ContentReadResult } from './contracts.js'
-import { AuroraApiError } from './errors.js'
+import { AuroraApiError, ToolInputError, ToolNotFoundError } from './errors.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -231,9 +231,9 @@ export async function listObjectsPage(
   page: number,
   perPage: number,
 ): Promise<CollectionPage<AuroraObjectRecord>> {
-  if (!Number.isInteger(page) || page < 1) throw new Error('page must be a positive integer')
+  if (!Number.isInteger(page) || page < 1) throw new ToolInputError('page must be a positive integer')
   if (!Number.isInteger(perPage) || perPage < 1 || perPage > 50) {
-    throw new Error('perPage must be an integer between 1 and 50')
+    throw new ToolInputError('perPage must be an integer between 1 and 50')
   }
   const client = getAuroraClient()
   const filter = type
@@ -280,14 +280,14 @@ export async function createObject(workspaceId: string, type: string, title: str
 export async function updateObjectTitle(id: string, title: string, workspaceId: string): Promise<void> {
   // Verify ownership before update
   const obj = await getObject(id, workspaceId)
-  if (!obj) throw new Error(`Object ${id} not found in this workspace`)
+  if (!obj) throw new ToolNotFoundError(`Object ${id} not found in this workspace`)
   const client = getAuroraClient()
   await client.collection('objects').update(id, { title })
 }
 
 export async function deleteObject(id: string, workspaceId: string): Promise<void> {
   const obj = await getObject(id, workspaceId)
-  if (!obj) throw new Error(`Object ${id} not found in this workspace`)
+  if (!obj) throw new ToolNotFoundError(`Object ${id} not found in this workspace`)
   const client = getAuroraClient()
   await client.collection('objects').update(id, { is_deleted: true })
 }
@@ -344,7 +344,7 @@ export async function getContentJson(objectId: string, workspaceId: string): Pro
   if (!json) return null
   if (typeof json === 'string') {
     if (json.startsWith('v1:') || json.startsWith('v2:')) {
-      throw new Error('Object content is end-to-end encrypted and cannot be modified by the MCP server')
+      throw new ToolInputError('Object content is end-to-end encrypted and cannot be modified by the MCP server')
     }
     return JSON.parse(json) as Record<string, unknown>
   }
@@ -421,7 +421,7 @@ export async function setContent(
   contentJson: Record<string, unknown>,
 ): Promise<void> {
   const obj = await getObject(objectId, workspaceId)
-  if (!obj) throw new Error(`Object ${objectId} not found in this workspace`)
+  if (!obj) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
 
   const client = getAuroraClient()
   const existing = await client.collection('content').listPage({
@@ -493,7 +493,7 @@ export async function upsertProperty(
 ): Promise<void> {
   // Verify object belongs to workspace
   const obj = await getObject(objectId, workspaceId)
-  if (!obj) throw new Error(`Object ${objectId} not found in this workspace`)
+  if (!obj) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
 
   const client = getAuroraClient()
   const existing = await client.collection('object_properties').listPage({
@@ -624,8 +624,8 @@ export async function updateTaskProps(
   patch: Partial<AuroraTaskProps>,
 ): Promise<void> {
   const obj = await getObject(objectId, workspaceId)
-  if (!obj) throw new Error(`Object ${objectId} not found in this workspace`)
-  if (obj.type !== 'task') throw new Error(`${objectId} is not a task`)
+  if (!obj) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
+  if (obj.type !== 'task') throw new ToolInputError(`${objectId} is not a task`)
 
   const client = getAuroraClient()
   const upsert = async (key: string, valueType: string, value: string | number | boolean | null) => {
@@ -686,7 +686,7 @@ export async function readCanvasContent(
 ): Promise<{ object: AuroraObjectRecord; contentJson: Record<string, unknown> | null } | null> {
   const object = await getObject(objectId, workspaceId)
   if (!object) return null
-  if (object.type !== 'canvas') throw new Error(`${objectId} is not a canvas`)
+  if (object.type !== 'canvas') throw new ToolInputError(`${objectId} is not a canvas`)
   const contentJson = await getContentJson(objectId, workspaceId)
   return { object, contentJson }
 }
