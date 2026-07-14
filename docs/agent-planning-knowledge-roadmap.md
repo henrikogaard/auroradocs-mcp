@@ -1,6 +1,6 @@
 # Agent Planning and Knowledge Roadmap
 
-Date: 2026-07-14  
+Date: 2026-07-14
 Status: Approved direction; implementation pending
 
 ## Purpose
