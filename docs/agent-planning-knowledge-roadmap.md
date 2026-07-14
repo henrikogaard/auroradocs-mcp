@@ -3,6 +3,11 @@
 Date: 2026-07-14
 Status: Approved direction; implementation pending
 
+## Implementation plans
+
+- [MCP runtime reliability and Resume work](superpowers/plans/2026-07-14-mcp-runtime-resume-work.md) — tracked in [issue #9](https://github.com/henrikogaard/auroradocs-mcp/issues/9)
+- [AuroraCloud workspace policy, multi-workspace grants, and project context](https://github.com/henrikogaard/auroradocs/blob/development/docs/superpowers/plans/2026-07-14-mcp-policy-multi-workspace.md)
+
 ## Purpose
 
 AuroraDocs MCP should make Aurora the durable, human-visible project brain for
