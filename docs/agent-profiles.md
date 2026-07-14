@@ -38,7 +38,8 @@ profile cannot race approvals, cursors, or dependent updates.
 
 Save the cursor returned by `get_project_context`. For a scheduled refresh,
 pass that change cursor to `list_project_changes`, process the bounded response,
-and persist its next cursor. A cursor belongs to one project in one workspace;
+and persist its next cursor. When `nextCursor` is `null`, retain the previous
+cursor; do not overwrite it with `null`. A cursor belongs to one project in one workspace;
 never reuse it across workspaces.
 
 Never expose the raw credential to prompts, logs, or committed configuration.
