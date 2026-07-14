@@ -30,8 +30,10 @@ itself. Each workspace owner approves access independently.
    grant each workspace independently. This is an owner-approved grant; adding
    a second workspace never expands the first workspace's grant.
 5. Start with `read:objects`. Add optional read scopes such as `read:content`
-   and `search` only for workflows that need them. A read-only resume client
-   should not receive `tasks`, `write:objects`, or `write:content`.
+   and `search` only for workflows that need them. For read-only task access, add `read:tasks`.
+   A read-only resume client should not receive
+   `write:tasks`, `write:objects`, or `write:content`. The legacy `tasks` scope
+   is compatibility-only and cannot be selected for new grants.
 6. Configure the local stdio process with `AURORA_API_URL` and
    `AURORA_API_TOKEN`. Client credentials do not use `AURORA_WORKSPACE_ID`.
 7. Restart the agent and call `list_workspaces`. Confirm that it returns only
@@ -39,6 +41,11 @@ itself. Each workspace owner approves access independently.
 8. Select one returned `workspace_id` and call `get_project_context` with an
    explicit project ID and bounded limits. Do not guess a project across
    workspaces.
+
+Every client-mode workspace data tool accepts exactly one explicit
+`workspace_id` or unambiguous `workspace_alias`. `list_project_changes` also
+requires the project ID and a saved change cursor. Legacy credentials remain
+pinned to `AURORA_WORKSPACE_ID` and cannot select another workspace.
 
 Workspace grants have independent scopes, expiry, and revocation. To rotate a
 grant, create its replacement, verify read-only access, then revoke the

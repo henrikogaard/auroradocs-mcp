@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Never include an `aur_mcp_` token, workspace content, or production user data in
+Never include an `aur_mcp_client_` or `aur_mcp_` token, workspace content, or production user data in
 logs, screenshots, issues, or support messages. Use the token fingerprint from
 **Settings → Workspace → MCP Access** when you need to identify a token.
 
@@ -9,12 +9,13 @@ logs, screenshots, issues, or support messages. Use the token fingerprint from
 | Symptom | Likely cause | Safe action |
 | --- | --- | --- |
 | Client reports `spawn npx ENOENT` | Node.js/npm is missing from the client's PATH. | Install Node.js 20 or newer, confirm `node --version` and `npx --version`, then restart the client. |
-| Server exits with `AURORA_WORKSPACE_ID environment variable is required` | The workspace ID is absent or misspelled. | Copy it again from the MCP Access configuration snippet and update the local client entry. |
+| Server exits with `AURORA_WORKSPACE_ID environment variable is required` | A legacy `aur_mcp_` token is missing its pinned workspace ID. | Copy it again from MCP Access. Client credentials must use `aur_mcp_client_` and omit this variable. |
 | Server exits with `AURORA_API_URL environment variable is required` | The API URL is missing. | Set it to `https://api.auroradocs.eu`. Do not add `/mcp`. |
 | Authentication is missing | `AURORA_API_TOKEN` was not passed to the child process. | Add the MCP token environment variable to the server entry. Do not use email/password authentication. |
 | Client shows no tools | The stdio process failed, is still connecting, or the client has stale configuration. | Inspect the client's MCP status, confirm the command is `npx -y @henrikogard/auroradocs-mcp@0.1.1`, then restart the client. |
 | JSON configuration will not load | Invalid JSON, usually a missing comma or an overwritten outer `mcpServers` object. | Validate the file as JSON and merge the server entry with existing entries. JSON cannot contain comments. |
-| Works in a terminal but not the desktop client | Desktop apps often use a different PATH and environment. | Keep all three Aurora variables in the MCP server's `env` object and restart the desktop app. |
+| Works in a terminal but not the desktop client | Desktop apps often use a different PATH and environment. | For client mode, pass the API URL and token; for legacy mode, also pass `AURORA_WORKSPACE_ID`. Restart the desktop app. |
+| Client credential reports an ambiguous workspace | The data call omitted a selector or an alias matches more than one grant. | Call `list_workspaces`, then pass one exact `workspace_id` or unambiguous `workspace_alias`. |
 
 ## AuroraCloud HTTP responses
 
@@ -43,6 +44,11 @@ grant more scopes to work around it; scopes do not provide encryption keys.
 
 After the server connects, call `list_objects` with a small limit using a
 `read:objects`-only token. Verify the workspace before granting more access.
+For `aur_mcp_client_`, call `list_workspaces` first and select the intended
+grant explicitly. Use `get_project_context` for an initial resume packet and
+`list_project_changes` with its required saved cursor for later refreshes.
+New task grants use `read:tasks` and `write:tasks`; the legacy `tasks` scope is
+compatibility-only and cannot be selected for new grants.
 
 ## Emergency revocation by role
 

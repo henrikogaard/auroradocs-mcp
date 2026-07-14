@@ -367,7 +367,7 @@ export type GrantedWorkspace = {
   role: string
   scopes: string[]
   grantId: string
-  expiresAt: string
+  expiresAt: string | null
 }
 
 export type AuroraConnectionContext =
@@ -439,7 +439,7 @@ Expected: FAIL because workflow tools do not exist.
 
 - [ ] **Step 3: Add exact input schemas**
 
-`get_project_context` requires a workspace selector and exactly one of `project_id` or `query`; accepts `activity_days` 1-90, `task_limit` 1-50, `source_limit` 1-25, and optional `cursor`. `list_project_changes` requires workspace selector, `project_id`, `cursor`, and optional `limit` 1-100.
+`get_project_context` requires a workspace selector and exactly one of `project_id` or `query`; accepts `activity_days` 1-90, `task_limit` 1-50, and `source_limit` 1-25. Its returned cursor seeds later refreshes. `list_project_changes` requires workspace selector, `project_id`, `cursor`, and optional `limit` 1-100.
 
 - [ ] **Step 4: Implement API calls and strict normalization**
 

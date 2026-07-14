@@ -1,7 +1,10 @@
 # Tools and scopes
 
-AuroraDocs MCP 0.1.1 exposes the tools below to a connected client. Every call
-is limited to the workspace in `AURORA_WORKSPACE_ID`.
+AuroraDocs MCP 0.1.1 exposes the tools below to a connected client. An
+`aur_mcp_client_` credential can discover its independently granted workspaces
+with `list_workspaces`; every workspace data call then selects one grant with
+`workspace_id` or an unambiguous `workspace_alias`. A legacy `aur_mcp_` token
+is pinned to its configured `AURORA_WORKSPACE_ID`.
 
 ## Scope catalog
 
@@ -10,13 +13,19 @@ is limited to the workspace in `AURORA_WORKSPACE_ID`.
 | `read:objects` | Read object metadata, properties, types, and the token workspace's member records. This is the startup baseline. |
 | `read:content` | Read object content and content-backed Canvas data. It does not grant object metadata access. |
 | `search` | Use workspace knowledge search and related-source discovery. Combine it with the read scopes needed for returned data. |
-| `tasks` | Read and write task-list data. Task objects and their properties also need the matching object scopes. |
+| `read:tasks` | Read task lists, task metadata, week planning, and project task context. |
+| `write:tasks` | Create or update task metadata and scheduling. It does not imply `read:tasks`. |
+| `tasks` | Legacy compatibility scope that combines task reads and writes. It is not offered for new client grants. |
 | `write:objects` | Create, rename, update properties on, or soft-delete objects. It does not grant reads. |
 | `write:content` | Create or modify object content. It does not grant content reads. |
 
 Scopes do not imply one another. AuroraCloud also enforces current workspace
 membership and role. A viewer cannot write even if a token carries a write
 scope.
+
+The legacy `tasks` scope is compatibility-only and cannot be selected for new grants.
+New grants use `read:tasks` and `write:tasks` so read-only agents never receive
+task mutation permission accidentally.
 
 `search_objects` and its `search` alias search object titles with `read:objects` only.
 `wiki_search` searches workspace knowledge and requires `read:objects` plus `search`.
@@ -30,6 +39,7 @@ including object lookup and startup membership verification.
 
 | Tool | What it does | Scopes |
 | --- | --- | --- |
+| `list_workspaces` | List only the workspaces independently granted to a client credential. | Client credential; no workspace selector |
 | `search_objects` | Search object titles, optionally by type. | `read:objects` |
 | `search` | Alias for `search_objects`. | `read:objects` |
 | `list_objects` | List object metadata, optionally by type. | `read:objects` |
@@ -40,16 +50,18 @@ including object lookup and startup membership verification.
 | `wiki_recent` | List recently updated readable sources. | `read:objects` |
 | `get_object` | Return one object's metadata, properties, and readable content. | `read:objects`, `read:content` |
 | `list_workspace_members` | List members and roles in the token workspace. | `read:objects` |
-| `list_task_lists` | List task lists. | `read:objects`, `tasks` |
-| `list_task_statuses` | Return supported task status names. | `read:objects`, `tasks` |
+| `list_task_lists` | List task lists. | `read:objects`, `read:tasks` |
+| `list_task_statuses` | Return supported task status names. | `read:objects`, `read:tasks` |
 | `get_mcp_tool_coverage` | Describe implemented tool coverage and known gaps. | `read:objects` startup baseline |
 | `get_mcp_workflow_recipes` | Return built-in workflow recipes and their scopes. | `read:objects` startup baseline |
-| `list_week_plan` | Read the Monday-start planning week and optional unscheduled tasks. | `read:objects`, `tasks` |
+| `list_week_plan` | Read the Monday-start planning week and optional unscheduled tasks. | `read:objects`, `read:tasks` |
 | `read_canvas` | Read Canvas cards, edges, references, frames, and warnings. | `read:objects`, `read:content` |
-| `schedule_task_block` | Schedule a task or create a task-backed time block. | `read:objects`, `tasks`, `write:objects` |
+| `get_project_context` | Load a bounded, citation-ready project resume packet. | `read:objects`, `read:tasks` |
+| `list_project_changes` | Read bounded project changes after a required cursor. | `read:objects`, `read:tasks` |
+| `schedule_task_block` | Schedule a task or create a task-backed time block. | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
 | `create_object` | Create a non-task object. | `read:objects`, `write:objects` |
-| `create_task` | Create a task and its task properties. | `read:objects`, `tasks`, `write:objects` |
-| `update_task` | Update fields on an existing task. | `read:objects`, `tasks`, `write:objects` |
+| `create_task` | Create a task and its task properties. | `read:objects`, `write:tasks`, `write:objects` |
+| `update_task` | Update fields on an existing task. | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
 | `update_object_title` | Rename an object. | `read:objects`, `write:objects` |
 | `update_object` | Rename an object and/or replace its plain-text content. | `read:objects`, `write:objects`; also `read:content`, `write:content` when replacing content |
 | `set_content` | Replace an object's content with plain text. | `read:objects`, `read:content`, `write:content` |
@@ -66,9 +78,9 @@ write access.
 | --- | --- | --- |
 | Connection check | `read:objects` | "List five object titles and IDs; do not modify anything." |
 | Research synthesis | `read:objects`, `read:content`, `search` | "Find relevant sources, cite their object IDs, and list uncertainty." |
-| Weekly review | `read:objects`, `read:content`, `search`, `tasks` | "Summarize recent sources and outstanding tasks without making changes." |
-| Task triage | `read:objects`, `tasks` | "Propose task field updates but do not apply them." |
-| Confirmed task edits | `read:objects`, `tasks`, `write:objects` | "Apply only the task changes I explicitly approve." |
+| Weekly review | `read:objects`, `read:content`, `search`, `read:tasks` | "Summarize recent sources and outstanding tasks without making changes." |
+| Task triage | `read:objects`, `read:tasks` | "Propose task field updates but do not apply them." |
+| Confirmed task edits | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` | "Apply only the task changes I explicitly approve." |
 
 `delete_object` is a write operation even though AuroraDocs uses reversible
 soft deletion. Treat it as destructive from the client's point of view.

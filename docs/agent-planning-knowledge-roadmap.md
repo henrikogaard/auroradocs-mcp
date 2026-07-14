@@ -259,7 +259,6 @@ Inputs include:
 - `project_id` or `query`
 - recent-activity window
 - bounded task and source limits
-- optional continuation or freshness cursor
 
 The response includes:
 
@@ -271,7 +270,7 @@ The response includes:
 - next actions
 - citation-ready normalized sources and deep links
 - per-source availability
-- `as_of` timestamp and continuation cursor
+- `as_of` timestamp and an initial change cursor for `list_project_changes`
 
 If a query is ambiguous, return bounded candidates and require the client to
 choose. Never silently select a similarly named project in another workspace.
@@ -291,7 +290,8 @@ choose. Never silently select a similarly named project in another workspace.
 - A fresh agent session can resume a named project without prior conversation
   history.
 - The response names current blockers and next actions with source citations.
-- Repeated refreshes can use a cursor instead of re-reading the whole project.
+- Repeated refreshes use the required `list_project_changes` cursor instead of
+  passing a cursor back to `get_project_context`.
 - Locked or denied content remains distinguishable and is never emitted as
   readable text.
 - A client with two granted workspaces cannot resolve a project without an

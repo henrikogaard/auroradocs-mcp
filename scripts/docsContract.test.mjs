@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import test from 'node:test'
 
 const requiredReadmeText = [
@@ -22,7 +22,23 @@ const requiredReadmeText = [
   'E2EE',
   'stdio',
   '@henrikogard/auroradocs-mcp@0.1.1',
+  'read:tasks',
+  'write:tasks',
 ]
+
+test('every packaged Markdown document avoids superseded runtime contracts', async () => {
+  const docsRoot = new URL('../docs/', import.meta.url)
+  const entries = await readdir(docsRoot, { recursive: true })
+  const markdown = entries.filter((entry) => entry.endsWith('.md'))
+  assert.ok(markdown.length >= 7)
+
+  for (const entry of markdown) {
+    const document = await readFile(new URL(entry, docsRoot), 'utf8')
+    assert.doesNotMatch(document, /Every call\s+is limited to the workspace in `AURORA_WORKSPACE_ID`/, entry)
+    assert.doesNotMatch(document, /`get_project_context`[^\n]*optional `cursor`/, entry)
+    assert.doesNotMatch(document, /expiresAt:\s*string(?!\s*\|)/, entry)
+  }
+})
 
 test('README documents complete public MCP onboarding', async () => {
   const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8')
@@ -221,6 +237,37 @@ test('public docs distinguish search scopes and role-specific emergency revocati
       `${name} must document the admin individual-revoke and owner-escalation path`,
     )
   }
+})
+
+test('packaged setup, tools, security, and troubleshooting cover both credential modes', async () => {
+  const [setup, tools, security, troubleshooting] = await Promise.all([
+    readFile(new URL('../docs/setup.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/tools.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/security.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/troubleshooting.md', import.meta.url), 'utf8'),
+  ])
+  const docs = [setup, tools, security, troubleshooting].join('\n')
+
+  for (const text of [
+    '`aur_mcp_client_`',
+    '`aur_mcp_`',
+    '`list_workspaces`',
+    '`workspace_id`',
+    '`workspace_alias`',
+    '`read:tasks`',
+    '`write:tasks`',
+    '`get_project_context`',
+    '`list_project_changes`',
+    'The legacy `tasks` scope is compatibility-only and cannot be selected for new grants.',
+  ]) {
+    assert.ok(docs.includes(text), `packaged docs are missing current credential/tool guidance: ${text}`)
+  }
+
+  assert.doesNotMatch(tools, /Every call\s+is limited to the workspace in `AURORA_WORKSPACE_ID`/)
+  assert.match(setup, /read-only task access[^\n]*`read:tasks`/i)
+  assert.match(tools, /^\| `list_workspaces` \|/m)
+  assert.match(tools, /^\| `get_project_context` \|/m)
+  assert.match(tools, /^\| `list_project_changes` \|/m)
 })
 
 test('publication audit contains only public-safe repository context', async () => {
