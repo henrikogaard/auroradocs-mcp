@@ -4,7 +4,7 @@ import test from 'node:test'
 import { validatePackageManifest } from './packageContentsCore.mjs'
 
 const validManifest = {
-  name: '@henrikogaard/auroradocs-mcp',
+  name: '@henrikogard/auroradocs-mcp',
   version: '0.1.1',
   bin: { 'aurora-mcp': 'dist/index.js' },
   paths: [

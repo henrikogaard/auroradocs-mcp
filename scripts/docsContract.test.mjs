@@ -21,7 +21,7 @@ const requiredReadmeText = [
   'Revoke all active tokens',
   'E2EE',
   'stdio',
-  '@henrikogaard/auroradocs-mcp@0.1.1',
+  '@henrikogard/auroradocs-mcp@0.1.1',
 ]
 
 test('README documents complete public MCP onboarding', async () => {
@@ -45,7 +45,7 @@ test('dedicated setup guide covers keys, clients, verification, and revocation',
     'Settings → Workspace → MCP Access',
     'shown only once',
     'read:objects',
-    '@henrikogaard/auroradocs-mcp@0.1.1',
+    '@henrikogard/auroradocs-mcp@0.1.1',
     'Claude Desktop',
     'developer settings',
     'Claude Code',
@@ -62,11 +62,14 @@ test('dedicated setup guide covers keys, clients, verification, and revocation',
 test('public docs use only the canonical scoped npm package', async () => {
   const documents = await Promise.all([
     readFile(new URL('../README.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/setup.md', import.meta.url), 'utf8'),
+    readFile(new URL('../SECURITY.md', import.meta.url), 'utf8'),
     readFile(new URL('../docs/troubleshooting.md', import.meta.url), 'utf8'),
   ])
   const docs = documents.join('\n')
 
-  assert.match(docs, /npx -y @henrikogaard\/auroradocs-mcp@0\.1\.1/)
+  assert.match(docs, /npx -y @henrikogard\/auroradocs-mcp@0\.1\.1/)
+  assert.doesNotMatch(docs, /@henrikogaard\/auroradocs-mcp/)
   assert.doesNotMatch(docs, /npx -y auroradocs-mcp(?:@|\s|`)/)
 })
 
