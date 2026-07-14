@@ -17,7 +17,7 @@ const multiWorkspaceContext: AuroraConnectionContext = {
   kind: 'client',
   workspaces: [
     { workspaceId: 'workspace-a1b2', alias: 'henrik-pkm-a1b2', name: 'Henrik PKM', role: 'owner', scopes: ['read:objects'], grantId: 'grant-1', expiresAt: '2026-10-01T00:00:00.000Z' },
-    { workspaceId: 'workspace-c3d4', alias: 'aurora-work-c3d4', name: 'Aurora Work', role: 'editor', scopes: ['read:objects'], grantId: 'grant-2', expiresAt: '2026-09-01T00:00:00.000Z' },
+    { workspaceId: 'workspace-c3d4', alias: 'aurora-work-c3d4', name: 'Aurora Work', role: 'editor', scopes: ['read:objects'], grantId: 'grant-2', expiresAt: null },
   ],
 }
 
@@ -25,6 +25,16 @@ test('list_workspaces exposes only the granted workspace contract', async () => 
   assert.deepEqual(await executeToolCall('list_workspaces', {}, multiWorkspaceContext), {
     type: 'workspaces',
     workspaces: multiWorkspaceContext.workspaces,
+  })
+})
+
+test('list_workspaces output schema accepts expiring and non-expiring grants', () => {
+  const definition = getToolDefinitions().find((tool) => tool.name === 'list_workspaces')
+  assert(definition)
+  const success = definition.outputSchema.oneOf?.find((variant) => variant.properties?.['type']?.const === 'workspaces')
+  const workspaces = success?.properties?.['workspaces'] as { items?: { properties?: Record<string, unknown> } } | undefined
+  assert.deepEqual(workspaces?.items?.properties?.['expiresAt'], {
+    type: ['string', 'null'],
   })
 })
 

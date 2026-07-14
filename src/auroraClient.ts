@@ -234,13 +234,16 @@ export async function authenticate(options: AuthenticateOptions = {}): Promise<A
 function mapGrantedWorkspace(value: unknown): GrantedWorkspace {
   if (!value || typeof value !== 'object') throw new Error('Invalid granted workspace')
   const item = value as Record<string, unknown>
-  const fields = ['workspaceId', 'alias', 'name', 'role', 'grantId', 'expiresAt'] as const
+  const fields = ['workspaceId', 'alias', 'name', 'role', 'grantId'] as const
   for (const field of fields) {
     if (typeof item[field] !== 'string' || !(item[field] as string).trim()) {
       throw new Error('Invalid granted workspace')
     }
   }
   if (!Array.isArray(item['scopes']) || !item['scopes'].every((scope) => typeof scope === 'string')) {
+    throw new Error('Invalid granted workspace')
+  }
+  if (item['expiresAt'] !== null && (typeof item['expiresAt'] !== 'string' || !item['expiresAt'].trim())) {
     throw new Error('Invalid granted workspace')
   }
   return {
@@ -250,7 +253,7 @@ function mapGrantedWorkspace(value: unknown): GrantedWorkspace {
     role: item['role'] as string,
     scopes: [...item['scopes']] as string[],
     grantId: item['grantId'] as string,
-    expiresAt: item['expiresAt'] as string,
+    expiresAt: item['expiresAt'] as string | null,
   }
 }
 

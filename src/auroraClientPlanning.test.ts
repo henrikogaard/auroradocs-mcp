@@ -40,7 +40,7 @@ test('client credential starts without AURORA_WORKSPACE_ID and discovers only gr
           role: 'editor',
           scopes: ['read:objects'],
           grantId: 'grant-2',
-          expiresAt: '2026-09-01T00:00:00.000Z',
+          expiresAt: null,
         },
       ],
     }))
@@ -59,6 +59,7 @@ test('client credential starts without AURORA_WORKSPACE_ID and discovers only gr
 
     assert.equal(context.kind, 'client')
     assert.deepEqual(context.workspaces.map((item) => item.alias), ['henrik-pkm-a1b2', 'aurora-work-c3d4'])
+    assert.deepEqual(context.workspaces.map((item) => item.expiresAt), ['2026-10-01T00:00:00.000Z', null])
     assert.equal('privateField' in context.workspaces[0], false)
     assert.deepEqual(requests, ['/api/mcp/workspaces'])
   } finally {

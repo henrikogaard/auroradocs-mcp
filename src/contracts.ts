@@ -34,7 +34,7 @@ export type GrantedWorkspace = {
   role: string
   scopes: string[]
   grantId: string
-  expiresAt: string
+  expiresAt: string | null
 }
 
 export type AuroraConnectionContext =

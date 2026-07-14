@@ -440,7 +440,7 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
           role: stringSchema,
           scopes: { type: 'array', items: stringSchema },
           grantId: stringSchema,
-          expiresAt: stringSchema,
+          expiresAt: nullableStringSchema,
         },
         required: ['workspaceId', 'alias', 'name', 'role', 'scopes', 'grantId', 'expiresAt'],
         additionalProperties: false,

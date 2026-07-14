@@ -301,7 +301,7 @@ test('client credentials discover granted workspaces without a default workspace
         role: 'owner',
         scopes: ['read:objects'],
         grantId: 'grant-test',
-        expiresAt: '2026-10-01T00:00:00.000Z',
+        expiresAt: null,
       }] }))
       return
     }
@@ -341,7 +341,7 @@ test('client credentials discover granted workspaces without a default workspace
         role: 'owner',
         scopes: ['read:objects'],
         grantId: 'grant-test',
-        expiresAt: '2026-10-01T00:00:00.000Z',
+        expiresAt: null,
       }],
     })
     const objects = await client.callTool({ name: 'list_objects', arguments: { workspace_alias: 'test-space-test', limit: 1 } })
