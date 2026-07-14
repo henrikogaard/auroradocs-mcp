@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
 import { test } from 'node:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -29,6 +30,70 @@ function closeServer(server: Server): Promise<void> {
     server.close((error) => error ? reject(error) : resolve())
   })
 }
+
+function runMcpProcess(env: Record<string, string>): Promise<{ exitCode: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['dist/index.js'], {
+      cwd: process.cwd(),
+      env,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
+    let stderr = ''
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk)
+    })
+    child.once('error', reject)
+    child.once('close', (exitCode) => resolve({ exitCode, stderr }))
+  })
+}
+
+test('authentication failure diagnostics do not expose private startup context', async () => {
+  const privateWorkspaceId = 'workspace-private-auth'
+  const privateUserId = 'user-private-auth'
+  const privateToken = 'aur_mcp_private_auth_token'
+  const privateUpstreamText = 'Confidential upstream membership details'
+  for (const failure of ['membership_rejected', 'upstream_error'] as const) {
+    const api = createServer((request, response) => {
+      const url = new URL(request.url ?? '/', 'http://127.0.0.1')
+      response.setHeader('content-type', 'application/json')
+
+      if (request.method === 'GET' && url.pathname === '/auth/me') {
+        response.end(JSON.stringify({ user: { id: privateUserId, private_note: privateUpstreamText } }))
+        return
+      }
+      if (request.method === 'GET' && url.pathname === '/api/collections/workspace_members/records') {
+        if (failure === 'membership_rejected') {
+          response.end(JSON.stringify({ items: [], totalPages: 1, private_error: privateUpstreamText }))
+        } else {
+          response.statusCode = 500
+          response.end(JSON.stringify({ error: privateUpstreamText }))
+        }
+        return
+      }
+
+      response.statusCode = 500
+      response.end(JSON.stringify({ error: privateUpstreamText }))
+    })
+
+    try {
+      const port = await listen(api)
+      const result = await runMcpProcess({
+        ...getDefaultEnvironment(),
+        AURORA_API_URL: `http://127.0.0.1:${port}`,
+        AURORA_API_TOKEN: privateToken,
+        AURORA_WORKSPACE_ID: privateWorkspaceId,
+      })
+
+      assert.equal(result.exitCode, 1)
+      assert.equal(result.stderr, 'AuroraDocs MCP authentication failed.\n')
+      for (const secret of [privateUserId, privateWorkspaceId, privateToken, privateUpstreamText]) {
+        assert.doesNotMatch(result.stderr, new RegExp(secret))
+      }
+    } finally {
+      if (api.listening) await closeServer(api)
+    }
+  }
+})
 
 test('an external stdio client can list and invoke the MCP coverage tool', async () => {
   const requests: Array<{ authorization: string | undefined; path: string; search: string }> = []

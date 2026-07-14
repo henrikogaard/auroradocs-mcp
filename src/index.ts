@@ -33,8 +33,8 @@ async function main() {
 
   try {
     await authenticate()
-  } catch (err) {
-    process.stderr.write(`Authentication failed: ${err instanceof Error ? err.message : err}\n`)
+  } catch {
+    process.stderr.write('AuroraDocs MCP authentication failed.\n')
     process.exit(1)
   }
 
@@ -45,7 +45,7 @@ async function main() {
   process.stderr.write('AuroraDocs MCP server running.\n')
 }
 
-main().catch((err) => {
-  process.stderr.write(`Fatal: ${err}\n`)
+main().catch(() => {
+  process.stderr.write('AuroraDocs MCP server failed to start.\n')
   process.exit(1)
 })

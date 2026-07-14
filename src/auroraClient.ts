@@ -206,7 +206,7 @@ export async function authenticate(): Promise<void> {
       perPage: 1,
     })
     if (!members.items.length) {
-      throw new Error(`Authenticated user ${userId} is not a member of workspace ${workspaceId}`)
+      throw new Error('Authenticated user is not a member of the configured workspace')
     }
     process.stderr.write('AuroraDocs MCP authenticated.\n')
   }
