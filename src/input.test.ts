@@ -39,4 +39,8 @@ test('workspace selector accepts one non-empty id or alias and rejects ambiguous
     ok: false,
     message: 'workspace_id must be a non-empty string',
   })
+  assert.deepEqual(readWorkspaceSelector({ workspace_id: undefined }), {
+    ok: false,
+    message: 'workspace_id must be a non-empty string',
+  })
 })

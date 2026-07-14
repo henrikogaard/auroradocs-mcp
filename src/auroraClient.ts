@@ -1,9 +1,9 @@
 /**
  * auroraClient.ts — AuroraCloud client helpers for the MCP server.
  *
- * SECURITY: Every query is scoped to the configured workspace.
- * On authenticate(), the server verifies the caller is a member of
- * that workspace — if not, the process exits.
+ * SECURITY: Client credentials discover only independently granted workspaces.
+ * Legacy credentials verify membership in their configured default workspace.
+ * Tool execution resolves a granted or verified workspace before data access.
  */
 import type { AuroraConnectionContext, ContentReadResult, GrantedWorkspace } from './contracts.js'
 import { AuroraApiError, ToolInputError, ToolNotFoundError } from './errors.js'

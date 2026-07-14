@@ -6,15 +6,16 @@
  * Uses the MCP stdio transport — add it to claude_desktop_config.json.
  *
  * SECURITY:
- *   - On startup the server verifies the authenticated user is a member
- *     of AURORA_WORKSPACE_ID. All queries are scoped to that workspace.
+ *   - Client credentials discover only independently granted workspaces.
+ *   - Legacy credentials verify membership in AURORA_WORKSPACE_ID.
+ *   - Every data tool resolves an explicit grant or the verified legacy default.
  *   - Object reads/writes verify workspace ownership before proceeding.
  *   - No cross-workspace or cross-user data leakage is possible.
  *
  * Environment variables:
- *   AURORA_WORKSPACE_ID  Workspace ID to expose
+ *   AURORA_WORKSPACE_ID  Required default workspace for legacy credentials
  *   AURORA_API_URL       AuroraCloud API URL, e.g. http://127.0.0.1:3000
- *   AURORA_API_TOKEN     AuroraCloud bearer token (recommended: workspace MCP token `aur_mcp_...`)
+ *   AURORA_API_TOKEN     AuroraCloud bearer token (`aur_mcp_client_...` recommended)
  *   AURORA_API_EMAIL     AuroraCloud user email (legacy/dev fallback)
  *   AURORA_API_PASSWORD  AuroraCloud user password (legacy/dev fallback)
  */

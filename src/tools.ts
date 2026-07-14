@@ -35,7 +35,7 @@ import { buildWeekPlan, normalizeCanvasContent } from './planningTools.js'
 import type { McpCanvasReadResult, McpWeekPlan } from './planningTools.js'
 import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js'
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
-import { readBoundedInteger } from './input.js'
+import { readBoundedInteger, readWorkspaceSelector } from './input.js'
 import { ToolInputError, toSafeToolError } from './errors.js'
 import type { AuroraConnectionContext, Availability, GrantedWorkspace, ToolErrorResult } from './contracts.js'
 
@@ -190,25 +190,28 @@ export function resolveWorkspace(
   context: AuroraConnectionContext,
   input: Record<string, unknown>,
 ): string {
-  const workspaceId = readString(input['workspace_id'])
-  const workspaceAlias = readString(input['workspace_alias'])
-  if (workspaceId && workspaceAlias) {
-    throw new ToolInputError('Provide only one of workspace_id or workspace_alias')
-  }
+  const hasSelector = Object.hasOwn(input, 'workspace_id') || Object.hasOwn(input, 'workspace_alias')
 
   if (context.kind === 'legacy_workspace') {
-    const selector = workspaceId ?? workspaceAlias
-    if (selector && selector !== context.defaultWorkspaceId) {
+    if (!hasSelector) return context.defaultWorkspaceId
+    const parsed = readWorkspaceSelector(input)
+    if (!parsed.ok) throw new ToolInputError(parsed.message)
+    const selector = 'workspaceId' in parsed.value ? parsed.value.workspaceId : parsed.value.workspaceAlias
+    if (selector !== context.defaultWorkspaceId) {
       throw new ToolInputError('Legacy credentials are restricted to the configured workspace')
     }
     return context.defaultWorkspaceId
   }
 
-  if (!workspaceId && !workspaceAlias) {
+  if (!hasSelector) {
     throw new ToolInputError('workspace_id or workspace_alias is required')
   }
+  const parsed = readWorkspaceSelector(input)
+  if (!parsed.ok) throw new ToolInputError(parsed.message)
   const matches = context.workspaces.filter((workspace) => (
-    workspaceId ? workspace.workspaceId === workspaceId : workspace.alias === workspaceAlias
+    'workspaceId' in parsed.value
+      ? workspace.workspaceId === parsed.value.workspaceId
+      : workspace.alias === parsed.value.workspaceAlias
   ))
   if (matches.length !== 1) {
     throw new ToolInputError('Workspace selector does not match an available grant')

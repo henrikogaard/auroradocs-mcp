@@ -51,7 +51,7 @@ test('client mode requires an unambiguous workspace selector before a data reque
       type: 'error', code: 'invalid_input', message: 'Workspace selector does not match an available grant', retryable: false,
     })
     assert.deepEqual(await executeToolCall('list_objects', { workspace_id: 'workspace-a1b2', workspace_alias: 'henrik-pkm-a1b2' }, multiWorkspaceContext), {
-      type: 'error', code: 'invalid_input', message: 'Provide only one of workspace_id or workspace_alias', retryable: false,
+      type: 'error', code: 'invalid_input', message: 'workspace_id and workspace_alias cannot be used together', retryable: false,
     })
     assert.equal(requestCount, 0)
   } finally {
@@ -67,6 +67,47 @@ test('legacy mode defaults to its configured workspace and rejects a different s
   assert.deepEqual(await executeToolCall('list_objects', { workspace_id: 'workspace-2' }, context), {
     type: 'error', code: 'invalid_input', message: 'Legacy credentials are restricted to the configured workspace', retryable: false,
   })
+})
+
+test('legacy mode rejects malformed explicit selectors before reads or mutations', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  let requestCount = 0
+  const server = createServer((_req, res) => {
+    requestCount += 1
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ items: [] }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+  const context: AuroraConnectionContext = { kind: 'legacy_workspace', defaultWorkspaceId: 'workspace-1', workspaces: [] }
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    assert.deepEqual(await executeToolCall('list_objects', { workspace_id: 42 }, context), {
+      type: 'error', code: 'invalid_input', message: 'workspace_id must be a non-empty string', retryable: false,
+    })
+    assert.deepEqual(await executeToolCall('list_objects', { workspace_alias: '   ' }, context), {
+      type: 'error', code: 'invalid_input', message: 'workspace_alias must be a non-empty string', retryable: false,
+    })
+    assert.deepEqual(await executeToolCall('update_object_title', {
+      id: 'object-1',
+      title: 'Must not mutate',
+      workspace_id: 'workspace-1',
+      workspace_alias: '   ',
+    }, context), {
+      type: 'error', code: 'invalid_input', message: 'workspace_id and workspace_alias cannot be used together', retryable: false,
+    })
+    assert.equal(requestCount, 0)
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
 })
 
 test('every data tool accepts optional workspace selectors while list_workspaces does not', () => {

@@ -18,12 +18,14 @@ export type WorkspaceSelectorResult =
   | { ok: false; message: string }
 
 export function readWorkspaceSelector(input: Record<string, unknown>): WorkspaceSelectorResult {
+  const hasId = Object.hasOwn(input, 'workspace_id')
+  const hasAlias = Object.hasOwn(input, 'workspace_alias')
   const rawId = input['workspace_id']
   const rawAlias = input['workspace_alias']
-  if (rawId !== undefined && rawAlias !== undefined) {
+  if (hasId && hasAlias) {
     return { ok: false, message: 'workspace_id and workspace_alias cannot be used together' }
   }
-  if (rawId !== undefined) {
+  if (hasId) {
     if (typeof rawId !== 'string' || !rawId.trim()) {
       return { ok: false, message: 'workspace_id must be a non-empty string' }
     }
