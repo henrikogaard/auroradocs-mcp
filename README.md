@@ -1,11 +1,11 @@
 # AuroraDocs MCP Server
 
-`auroradocs-mcp` connects a local MCP client to one AuroraCloud workspace. It
-runs on your computer over stdio and sends authenticated requests to
-`https://api.auroradocs.eu`.
+`@henrikogaard/auroradocs-mcp` connects a local MCP client to one AuroraCloud
+workspace. It runs on your computer over stdio and sends authenticated requests
+to `https://api.auroradocs.eu`.
 
-The public package is `auroradocs-mcp`, the executable is `aurora-mcp`, and
-this documentation targets version `0.1.0`.
+The public package is `@henrikogaard/auroradocs-mcp`, the executable is
+`aurora-mcp`, and this documentation targets version `0.1.1`.
 
 ## Requirements
 
@@ -67,7 +67,7 @@ in the knowledge-search recipe above.
 ## Configure a client
 
 All examples below use the production AuroraCloud API and pin package version
-`0.1.0`. Replace `WORKSPACE_ID` and `REDACTED` locally. Do not commit the
+`0.1.1`. Replace `WORKSPACE_ID` and `REDACTED` locally. Do not commit the
 resulting configuration.
 
 The server requires exactly these environment variables:
@@ -91,7 +91,7 @@ this server under `mcpServers`, preserving any servers already present:
   "mcpServers": {
     "auroradocs": {
       "command": "npx",
-      "args": ["-y", "auroradocs-mcp@0.1.0"],
+      "args": ["-y", "@henrikogaard/auroradocs-mcp@0.1.1"],
       "env": {
         "AURORA_API_URL": "https://api.auroradocs.eu",
         "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
@@ -116,7 +116,7 @@ claude mcp add --transport stdio --scope user \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y auroradocs-mcp@0.1.0
+  auroradocs -- npx -y @henrikogaard/auroradocs-mcp@0.1.1
 ```
 
 Run `claude mcp get auroradocs` to inspect the saved entry, then use `/mcp` in
@@ -132,7 +132,7 @@ codex mcp add \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y auroradocs-mcp@0.1.0
+  auroradocs -- npx -y @henrikogaard/auroradocs-mcp@0.1.1
 ```
 
 Run `codex mcp get auroradocs` to inspect the saved entry.
@@ -144,7 +144,7 @@ Use this valid generic JSON shape when a client accepts an MCP server object:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "auroradocs-mcp@0.1.0"],
+  "args": ["-y", "@henrikogaard/auroradocs-mcp@0.1.1"],
   "env": {
     "AURORA_API_URL": "https://api.auroradocs.eu",
     "AURORA_WORKSPACE_ID": "WORKSPACE_ID",

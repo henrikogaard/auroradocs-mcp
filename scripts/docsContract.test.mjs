@@ -21,6 +21,7 @@ const requiredReadmeText = [
   'Revoke all active tokens',
   'E2EE',
   'stdio',
+  '@henrikogaard/auroradocs-mcp@0.1.1',
 ]
 
 test('README documents complete public MCP onboarding', async () => {
@@ -29,6 +30,17 @@ test('README documents complete public MCP onboarding', async () => {
   for (const text of requiredReadmeText) {
     assert.ok(readme.includes(text), `README is missing required text: ${text}`)
   }
+})
+
+test('public docs use only the canonical scoped npm package', async () => {
+  const documents = await Promise.all([
+    readFile(new URL('../README.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/troubleshooting.md', import.meta.url), 'utf8'),
+  ])
+  const docs = documents.join('\n')
+
+  assert.match(docs, /npx -y @henrikogaard\/auroradocs-mcp@0\.1\.1/)
+  assert.doesNotMatch(docs, /npx -y auroradocs-mcp(?:@|\s|`)/)
 })
 
 test('public docs distinguish search scopes and role-specific emergency revocation', async () => {

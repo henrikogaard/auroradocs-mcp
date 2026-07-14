@@ -6,9 +6,10 @@ Please report suspected vulnerabilities privately to
 [contact@auroradocs.eu](mailto:contact@auroradocs.eu). Do not open a public
 GitHub issue or discussion for a security report.
 
-Include a concise description, the affected `auroradocs-mcp` version, expected
-and observed behavior, and minimal reproduction steps. Screenshots or sanitized
-logs are useful when they do not expose private information.
+Include a concise description, the affected `@henrikogaard/auroradocs-mcp`
+version, expected and observed behavior, and minimal reproduction steps.
+Screenshots or sanitized logs are useful when they do not expose private
+information.
 
 Do not send passwords, MFA codes, MCP tokens, access or refresh tokens, private
 keys, workspace IDs, workspace contents, production user data, or other

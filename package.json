@@ -1,6 +1,6 @@
 {
-  "name": "auroradocs-mcp",
-  "version": "0.1.0",
+  "name": "@henrikogaard/auroradocs-mcp",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
   "description": "AuroraCloud-first MCP server that exposes AuroraDocs workspace data to Claude Desktop and other AI agents",
@@ -12,6 +12,9 @@
   "homepage": "https://github.com/henrikogaard/auroradocs-mcp#readme",
   "bugs": {
     "url": "https://github.com/henrikogaard/auroradocs-mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=20"
