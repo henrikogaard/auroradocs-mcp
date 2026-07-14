@@ -37,7 +37,15 @@ import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
 import { readBoundedInteger, readWorkspaceSelector } from './input.js'
 import { ToolInputError, toSafeToolError } from './errors.js'
-import type { AuroraConnectionContext, Availability, GrantedWorkspace, ToolErrorResult } from './contracts.js'
+import { getProjectContext, listProjectChanges } from './projectContext.js'
+import type {
+  AuroraConnectionContext,
+  Availability,
+  GrantedWorkspace,
+  ProjectChangesResult,
+  ProjectContextResult,
+  ToolErrorResult,
+} from './contracts.js'
 
 // ── Result types ─────────────────────────────────────────────────────────────
 
@@ -63,6 +71,8 @@ export type ToolResult =
   | { type: 'members'; members: { id: string; name: string | null; email: string; role: string }[] }
   | { type: 'task_lists'; task_lists: { id: string; name: string }[] }
   | { type: 'task_statuses'; statuses: string[] }
+  | ({ type: 'project_context' } & ProjectContextResult)
+  | ({ type: 'project_changes' } & ProjectChangesResult)
   | { type: 'no_op'; message: string }
   | ToolErrorResult
 
@@ -369,6 +379,41 @@ async function executeToolCallUnsafe(
 
       case 'get_mcp_workflow_recipes':
         return { type: 'mcp_workflow_recipes', recipes: getMcpWorkflowRecipes() }
+
+      case 'get_project_context': {
+        const projectId = readString(input['project_id'])
+        const query = readString(input['query'])
+        if ((projectId === null) === (query === null)) {
+          return invalidInput('Exactly one of project_id or query is required')
+        }
+        const activityDays = readBoundedInteger(input, 'activity_days', { defaultValue: 14, min: 1, max: 90 })
+        if (!activityDays.ok) return invalidInput(activityDays.message)
+        const taskLimit = readBoundedInteger(input, 'task_limit', { defaultValue: 20, min: 1, max: 50 })
+        if (!taskLimit.ok) return invalidInput(taskLimit.message)
+        const sourceLimit = readBoundedInteger(input, 'source_limit', { defaultValue: 10, min: 1, max: 25 })
+        if (!sourceLimit.ok) return invalidInput(sourceLimit.message)
+        const cursor = Object.hasOwn(input, 'cursor') ? readString(input['cursor']) : undefined
+        if (Object.hasOwn(input, 'cursor') && !cursor) return invalidInput('cursor must be a non-empty string')
+        const result = await getProjectContext(workspaceId, {
+          ...(projectId ? { projectId } : { query: query as string }),
+          activityDays: activityDays.value,
+          taskLimit: taskLimit.value,
+          sourceLimit: sourceLimit.value,
+          ...(cursor ? { cursor } : {}),
+        })
+        return { type: 'project_context', ...result }
+      }
+
+      case 'list_project_changes': {
+        const projectId = readString(input['project_id'])
+        if (!projectId) return invalidInput('project_id is required')
+        const cursor = readString(input['cursor'])
+        if (!cursor) return invalidInput('cursor is required')
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 50, min: 1, max: 100 })
+        if (!limit.ok) return invalidInput(limit.message)
+        const result = await listProjectChanges(workspaceId, { projectId, cursor, limit: limit.value })
+        return { type: 'project_changes', ...result }
+      }
 
       case 'list_week_plan': {
         const anchorDate = readString(input['anchor_date']) ?? todayDateKey()
@@ -815,6 +860,49 @@ export function formatToolResult(result: ToolResult): string {
       return result.task_lists.map((l) => `- ${l.name} (${l.id})`).join('\n')
     case 'task_statuses':
       return result.statuses.join(', ')
+    case 'project_context': {
+      const header = [
+        `Workspace: ${result.workspace.name} (${result.workspace.id})`,
+        result.status === 'ok'
+          ? `Project: ${result.project.title} (${result.project.id})`
+          : result.status === 'ambiguous'
+            ? 'Project: ambiguous query'
+            : 'Project: not found',
+        `As of: ${result.asOf}`,
+      ]
+      if (result.status === 'ambiguous') {
+        return [...header, 'Candidates:', ...result.candidates.map((candidate) => `- ${candidate.title} (${candidate.id})`)].join('\n')
+      }
+      if (result.status === 'not_found') return header.join('\n')
+      return [
+        ...header,
+        'Blockers:',
+        ...(result.project.blockers.length ? result.project.blockers.map((item) => `- ${item}`) : ['- None']),
+        'Next actions:',
+        ...(result.project.nextActions.length ? result.project.nextActions.map((item) => `- ${item}`) : ['- None']),
+        'Citations:',
+        ...(result.project.sources.length
+          ? result.project.sources.map((source) => `- ${source.title ?? '(Untitled)'} [${source.sourceId}] ${source.deepLink}`)
+          : ['- None']),
+      ].join('\n')
+    }
+    case 'project_changes': {
+      const header = [
+        `Workspace: ${result.workspace.name} (${result.workspace.id})`,
+        result.status === 'ok' ? `Project: ${result.project.title} (${result.project.id})` : 'Project: not found',
+        `As of: ${result.asOf}`,
+      ]
+      if (result.status === 'not_found') return header.join('\n')
+      return [
+        ...header,
+        'Changes:',
+        ...(result.items.length
+          ? result.items.map((item) => `- ${item.updatedAt} ${item.type}: ${item.title ?? item.id} (${item.id})`)
+          : ['- None']),
+        `Next cursor: ${result.nextCursor ?? 'none'}`,
+        `Has more: ${result.hasMore}`,
+      ].join('\n')
+    }
     case 'no_op':
       return result.message
     case 'error':

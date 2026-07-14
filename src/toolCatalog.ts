@@ -78,6 +78,8 @@ const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
   list_week_plan: 'read',
   schedule_task_block: 'write',
   read_canvas: 'read',
+  get_project_context: 'read',
+  list_project_changes: 'read',
   get_mcp_tool_coverage: 'read',
   get_mcp_workflow_recipes: 'read',
   create_object: 'write',
@@ -322,6 +324,109 @@ const WORKFLOW_RECIPE_SCHEMA: JsonObjectSchema = {
   additionalProperties: false,
 }
 
+const PROJECT_WORKSPACE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, name: stringSchema },
+  required: ['id', 'name'],
+  additionalProperties: false,
+}
+
+const PROJECT_IDENTITY_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, workspaceId: stringSchema, title: stringSchema },
+  required: ['id', 'workspaceId', 'title'],
+  additionalProperties: false,
+}
+
+const PROJECT_AVAILABILITY_SCHEMA: JsonSchema = {
+  type: 'string',
+  enum: ['available', 'empty', 'encrypted_locked', 'permission_denied', 'not_found', 'unavailable', 'not_indexed', 'unsupported_type'],
+}
+
+const PROJECT_CHANGE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, type: stringSchema, title: nullableStringSchema, updatedAt: stringSchema },
+  required: ['id', 'type', 'title', 'updatedAt'],
+  additionalProperties: false,
+}
+
+const PROJECT_ACTIVITY_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, title: nullableStringSchema, updatedAt: stringSchema },
+  required: ['id', 'title', 'updatedAt'],
+  additionalProperties: false,
+}
+
+const PROJECT_TASK_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, title: stringSchema, status: nullableStringSchema, updatedAt: stringSchema },
+  required: ['id', 'title', 'status', 'updatedAt'],
+  additionalProperties: false,
+}
+
+const PROJECT_CITATION_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    sourceId: stringSchema,
+    title: nullableStringSchema,
+    deepLink: stringSchema,
+    updatedAt: stringSchema,
+    availability: PROJECT_AVAILABILITY_SCHEMA,
+  },
+  required: ['sourceId', 'title', 'deepLink', 'updatedAt', 'availability'],
+  additionalProperties: false,
+}
+
+const PROJECT_RESUME_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    ...PROJECT_IDENTITY_SCHEMA.properties,
+    goal: nullableStringSchema,
+    status: nullableStringSchema,
+    priority: nullableStringSchema,
+    owner: nullableStringSchema,
+    progress: { type: ['number', 'null'], minimum: 0, maximum: 100 },
+    startDate: nullableStringSchema,
+    dueDate: nullableStringSchema,
+    brief: {
+      type: 'object',
+      properties: { availability: PROJECT_AVAILABILITY_SCHEMA, text: nullableStringSchema },
+      required: ['availability', 'text'],
+      additionalProperties: false,
+    },
+    tasks: {
+      type: 'object',
+      properties: {
+        availability: PROJECT_AVAILABILITY_SCHEMA,
+        groups: {
+          type: 'object',
+          properties: {
+            todo: { type: 'array', items: PROJECT_TASK_SCHEMA },
+            in_progress: { type: 'array', items: PROJECT_TASK_SCHEMA },
+            blocked: { type: 'array', items: PROJECT_TASK_SCHEMA },
+            done: { type: 'array', items: PROJECT_TASK_SCHEMA },
+          },
+          required: ['todo', 'in_progress', 'blocked', 'done'],
+          additionalProperties: false,
+        },
+      },
+      required: ['availability', 'groups'],
+      additionalProperties: false,
+    },
+    blockers: { type: 'array', items: stringSchema },
+    risks: { type: 'array', items: stringSchema },
+    unresolvedDecisions: { type: 'array', items: stringSchema },
+    recentActivity: { type: 'array', items: PROJECT_ACTIVITY_SCHEMA },
+    nextActions: { type: 'array', items: stringSchema },
+    sources: { type: 'array', items: PROJECT_CITATION_SCHEMA },
+  },
+  required: [
+    'id', 'workspaceId', 'title', 'goal', 'status', 'priority', 'owner', 'progress', 'startDate', 'dueDate',
+    'brief', 'tasks', 'blockers', 'risks', 'unresolvedDecisions', 'recentActivity', 'nextActions', 'sources',
+  ],
+  additionalProperties: false,
+}
+
 const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
   list_workspaces: [resultSchema('workspaces', {
     workspaces: {
@@ -389,6 +494,42 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
   read_canvas: [resultSchema('canvas', { canvas: CANVAS_SCHEMA }, ['canvas'])],
   get_mcp_tool_coverage: [resultSchema('mcp_tool_coverage', { audit: COVERAGE_AUDIT_SCHEMA }, ['audit'])],
   get_mcp_workflow_recipes: [resultSchema('mcp_workflow_recipes', { recipes: { type: 'array', items: WORKFLOW_RECIPE_SCHEMA } }, ['recipes'])],
+  get_project_context: [
+    resultSchema('project_context', {
+      status: { const: 'ok' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      project: PROJECT_RESUME_SCHEMA,
+      asOf: stringSchema,
+      cursor: nullableStringSchema,
+    }, ['status', 'workspace', 'project', 'asOf', 'cursor']),
+    resultSchema('project_context', {
+      status: { const: 'ambiguous' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      candidates: { type: 'array', items: PROJECT_IDENTITY_SCHEMA },
+      asOf: stringSchema,
+    }, ['status', 'workspace', 'candidates', 'asOf']),
+    resultSchema('project_context', {
+      status: { const: 'not_found' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      asOf: stringSchema,
+    }, ['status', 'workspace', 'asOf']),
+  ],
+  list_project_changes: [
+    resultSchema('project_changes', {
+      status: { const: 'ok' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      project: PROJECT_IDENTITY_SCHEMA,
+      asOf: stringSchema,
+      items: { type: 'array', items: PROJECT_CHANGE_SCHEMA },
+      nextCursor: nullableStringSchema,
+      hasMore: { type: 'boolean' },
+    }, ['status', 'workspace', 'project', 'asOf', 'items', 'nextCursor', 'hasMore']),
+    resultSchema('project_changes', {
+      status: { const: 'not_found' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      asOf: stringSchema,
+    }, ['status', 'workspace', 'asOf']),
+  ],
   create_object: [resultSchema('created', { id: stringSchema, title: stringSchema }, ['id', 'title'])],
   create_task: [resultSchema('task_created', {
     id: stringSchema,
@@ -597,6 +738,38 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
     name: 'get_mcp_workflow_recipes',
     description: 'Return documented agent workflow recipes and the MCP tools/scopes they use.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_project_context',
+    description: 'Resume planning work with a bounded project packet containing tasks, blockers, next actions, and citations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Exact project object ID; cannot be combined with query' },
+        query: { type: 'string', description: 'Project title query; cannot be combined with project_id' },
+        activity_days: { type: 'integer', minimum: 1, maximum: 90, description: 'Recent activity window in days (default 14)' },
+        task_limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum project tasks (default 20)' },
+        source_limit: { type: 'integer', minimum: 1, maximum: 25, description: 'Maximum citation sources (default 10)' },
+        cursor: { type: 'string', description: 'Optional opaque project-context cursor' },
+      },
+      oneOf: [
+        { type: 'object', properties: { project_id: stringSchema }, required: ['project_id'] },
+        { type: 'object', properties: { query: stringSchema }, required: ['query'] },
+      ],
+    },
+  },
+  {
+    name: 'list_project_changes',
+    description: 'List bounded project changes after an opaque cursor.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Exact project object ID' },
+        cursor: { type: 'string', description: 'Opaque cursor returned by project context or a previous change page' },
+        limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Maximum changes to return (default 50)' },
+      },
+      required: ['project_id', 'cursor'],
+    },
   },
   {
     name: 'create_object',

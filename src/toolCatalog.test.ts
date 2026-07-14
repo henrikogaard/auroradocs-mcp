@@ -179,6 +179,8 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
     list_week_plan: 'read',
     schedule_task_block: 'write',
     read_canvas: 'read',
+    get_project_context: 'read',
+    list_project_changes: 'read',
     get_mcp_tool_coverage: 'read',
     get_mcp_workflow_recipes: 'read',
     create_object: 'write',
@@ -218,6 +220,8 @@ test('every tool declares output schema and accurate effect annotations', () => 
     list_week_plan: ['week_plan'],
     schedule_task_block: ['scheduled_task_block'],
     read_canvas: ['canvas'],
+    get_project_context: ['project_context', 'project_context', 'project_context'],
+    list_project_changes: ['project_changes', 'project_changes'],
     get_mcp_tool_coverage: ['mcp_tool_coverage'],
     get_mcp_workflow_recipes: ['mcp_workflow_recipes'],
     create_object: ['created'],
@@ -286,6 +290,16 @@ test('MCP tool catalog declares bounded integer schemas for count inputs', () =>
     maximum: 50,
     description: (property('list_week_plan', 'unscheduled_limit') as { description: string }).description,
   })
+  for (const [tool, key, maximum] of [
+    ['get_project_context', 'activity_days', 90],
+    ['get_project_context', 'task_limit', 50],
+    ['get_project_context', 'source_limit', 25],
+    ['list_project_changes', 'limit', 100],
+  ] as const) {
+    assert.equal(property(tool, key)?.type, 'integer')
+    assert.equal(property(tool, key)?.minimum, 1)
+    assert.equal(property(tool, key)?.maximum, maximum)
+  }
 })
 
 test('list_objects rejects an invalid limit before network access', async () => {
