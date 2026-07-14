@@ -85,6 +85,67 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
   assert.equal(getToolEffect('unknown_tool'), undefined)
 })
 
+test('MCP tool catalog declares bounded integer schemas for count inputs', () => {
+  const definitions = new Map(getToolDefinitions().map((tool) => [tool.name, tool]))
+  const property = (tool: string, key: string) =>
+    definitions.get(tool)?.inputSchema.properties[key]
+
+  for (const tool of ['list_objects', 'list_recent', 'wiki_search']) {
+    assert.deepEqual(property(tool, 'limit'), {
+      type: 'integer',
+      minimum: 1,
+      maximum: 50,
+      description: definitions.get(tool)?.inputSchema.properties['limit'] &&
+        (definitions.get(tool)?.inputSchema.properties['limit'] as { description: string }).description,
+    })
+  }
+  for (const tool of ['wiki_related', 'wiki_recent']) {
+    assert.deepEqual(property(tool, 'limit'), {
+      type: 'integer',
+      minimum: 1,
+      maximum: 10,
+      description: definitions.get(tool)?.inputSchema.properties['limit'] &&
+        (definitions.get(tool)?.inputSchema.properties['limit'] as { description: string }).description,
+    })
+  }
+  assert.deepEqual(property('list_week_plan', 'unscheduled_limit'), {
+    type: 'integer',
+    minimum: 1,
+    maximum: 50,
+    description: (property('list_week_plan', 'unscheduled_limit') as { description: string }).description,
+  })
+})
+
+test('list_objects rejects an invalid limit before network access', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  let requestCount = 0
+  const server = createServer((_req, res) => {
+    requestCount += 1
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ items: [], page: 1, perPage: 20, totalPages: 1, totalItems: 0 }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const result = await executeToolCall('list_objects', { workspace_id: 'workspace-1', limit: -1 }, 'workspace-1')
+
+    assert.deepEqual(result, { type: 'error', message: 'limit must be an integer between 1 and 50' })
+    assert.equal(requestCount, 0)
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
 test('read_canvas validates required id before reading workspace content', async () => {
   const result = await executeToolCall('read_canvas', {}, 'workspace-1')
 

@@ -74,6 +74,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {
         query: { type: 'string', description: 'Keyword to search for in object titles' },
         type: { type: 'string', description: 'Optional object type filter (page, note, task, etc.)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 10, max 50)' },
       },
       required: ['query'],
     },
@@ -86,6 +87,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {
         query: { type: 'string', description: 'Keyword to search for in object titles' },
         type: { type: 'string', description: 'Optional object type filter (page, note, task, etc.)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 10, max 50)' },
       },
       required: ['query'],
     },
@@ -97,7 +99,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         type: { type: 'string', description: 'Optional object type to filter by' },
-        limit: { type: 'number', description: 'Maximum results to return (default 20)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 20)' },
       },
     },
   },
@@ -108,7 +110,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         type: { type: 'string', description: 'Optional object type to filter by' },
-        limit: { type: 'number', description: 'Maximum results to return (default 20)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 20)' },
       },
     },
   },
@@ -119,7 +121,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query to run against workspace knowledge' },
-        limit: { type: 'number', description: 'Maximum results to return (default 20, max 50)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 20, max 50)' },
       },
       required: ['query'],
     },
@@ -143,7 +145,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         id: { type: 'string', description: 'The object ID' },
-        limit: { type: 'number', description: 'Maximum results to return (default 6, max 10)' },
+        limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Maximum results to return (default 6, max 10)' },
       },
       required: ['id'],
     },
@@ -154,7 +156,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: { type: 'number', description: 'Maximum results to return (default 6, max 10)' },
+        limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Maximum results to return (default 6, max 10)' },
       },
     },
   },
@@ -192,7 +194,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {
         anchor_date: { type: 'string', description: 'Date inside the requested week, formatted YYYY-MM-DD. Defaults to today.' },
         include_unscheduled: { type: 'boolean', description: 'Include incomplete tasks without a due date. Defaults to true.' },
-        unscheduled_limit: { type: 'number', description: 'Maximum unscheduled tasks to return. Defaults to 12, max 50.' },
+        unscheduled_limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum unscheduled tasks to return. Defaults to 12, max 50.' },
       },
     },
   },

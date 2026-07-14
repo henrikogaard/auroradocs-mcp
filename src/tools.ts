@@ -6,7 +6,7 @@
  * No cross-workspace or cross-user data leakage is possible.
  */
 import {
-  listObjects,
+  listObjectsPage,
   getObject,
   getContent,
   setContent,
@@ -28,12 +28,14 @@ import {
   createPlanningTimeBlock,
   readCanvasContent,
   searchWorkspaceKnowledgeServer,
+  searchObjectsPage,
 } from './auroraClient.js'
 import type { AuroraWorkspaceMember, AuroraTaskList, AuroraTaskProps, WorkspaceKnowledgeSource } from './auroraClient.js'
 import { buildWeekPlan, normalizeCanvasContent } from './planningTools.js'
 import type { McpCanvasReadResult, McpWeekPlan } from './planningTools.js'
 import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js'
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
+import { readBoundedInteger } from './input.js'
 
 // ── Result types ─────────────────────────────────────────────────────────────
 
@@ -172,34 +174,42 @@ export async function executeToolCall(
 
       case 'search':
       case 'search_objects': {
-        const query = String(input['query'] ?? '').toLowerCase()
+        const query = String(input['query'] ?? '').trim()
         const typeFilter = input['type'] ? String(input['type']) : undefined
-        const all = await listObjects(workspaceId, typeFilter)
-        const matches = all
-          .filter((o) => (o.title ?? '').toLowerCase().includes(query))
-          .slice(0, 10)
-          .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 10, min: 1, max: 50 })
+        if (!limit.ok) return { type: 'error', message: limit.message }
+        const sources = await searchObjectsPage(workspaceId, query, limit.value)
+        const matches = [...new Map(
+          sources
+            .filter((source) => !typeFilter || source.objectType === typeFilter)
+            .map((source) => [source.objectId, {
+              id: source.objectId,
+              title: source.title,
+              type: source.objectType,
+              icon: source.icon,
+            }]),
+        ).values()].slice(0, limit.value)
         return { type: 'objects', objects: matches }
       }
 
       case 'list_objects': {
         const typeFilter = input['type'] ? String(input['type']) : undefined
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 20
-        const all = await listObjects(workspaceId, typeFilter)
-        const results = all
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
+        if (!limit.ok) return { type: 'error', message: limit.message }
+        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value)
+        const results = page.items
           .filter((o) => !o.is_template)
-          .slice(0, limit)
           .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
         return { type: 'objects', objects: results }
       }
 
       case 'list_recent': {
         const typeFilter = input['type'] ? String(input['type']) : undefined
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 20
-        const all = await listObjects(workspaceId, typeFilter)
-        const results = all
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
+        if (!limit.ok) return { type: 'error', message: limit.message }
+        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value)
+        const results = page.items
           .filter((o) => !o.is_template)
-          .slice(0, limit)
           .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
         return { type: 'objects', objects: results }
       }
@@ -207,8 +217,9 @@ export async function executeToolCall(
       case 'wiki_search': {
         const query = readString(input['query'])
         if (!query) return { type: 'error', message: 'Query is required' }
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 20
-        const sources = await searchWorkspaceKnowledgeServer(workspaceId, query, limit)
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
+        if (!limit.ok) return { type: 'error', message: limit.message }
+        const sources = await searchWorkspaceKnowledgeServer(workspaceId, query, limit.value)
         return { type: 'knowledge_sources', sources }
       }
 
@@ -224,14 +235,16 @@ export async function executeToolCall(
       case 'wiki_related': {
         const id = readString(input['id'])
         if (!id) return { type: 'error', message: 'Object ID is required' }
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 6
-        const sources = await listWorkspaceRelatedKnowledgeServer(workspaceId, id, limit)
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 6, min: 1, max: 10 })
+        if (!limit.ok) return { type: 'error', message: limit.message }
+        const sources = await listWorkspaceRelatedKnowledgeServer(workspaceId, id, limit.value)
         return { type: 'knowledge_sources', sources }
       }
 
       case 'wiki_recent': {
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 6
-        const sources = await listWorkspaceRecentKnowledgeServer(workspaceId, limit)
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 6, min: 1, max: 10 })
+        if (!limit.ok) return { type: 'error', message: limit.message }
+        const sources = await listWorkspaceRecentKnowledgeServer(workspaceId, limit.value)
         return { type: 'knowledge_sources', sources }
       }
 
@@ -295,7 +308,8 @@ export async function executeToolCall(
         }
 
         const includeUnscheduled = input['include_unscheduled'] !== false
-        const unscheduledLimit = typeof input['unscheduled_limit'] === 'number' ? input['unscheduled_limit'] : 12
+        const unscheduledLimit = readBoundedInteger(input, 'unscheduled_limit', { defaultValue: 12, min: 1, max: 50 })
+        if (!unscheduledLimit.ok) return { type: 'error', message: unscheduledLimit.message }
         const tasks = await listPlanningTasks(workspaceId)
         return {
           type: 'week_plan',
@@ -309,7 +323,7 @@ export async function executeToolCall(
           })), {
             anchorDate,
             includeUnscheduled,
-            unscheduledLimit,
+            unscheduledLimit: unscheduledLimit.value,
           }),
         }
       }

@@ -124,13 +124,22 @@ type BackendAuthStore = {
   save(token: string, record: AuthRecord): void
 }
 
+export type CollectionPage<T> = {
+  items: T[]
+  page: number
+  perPage: number
+  totalPages: number
+  totalItems: number
+}
+
 type BackendCollection = {
-  list(options?: {
+  listPage(options: {
     filter?: string
     sort?: string
     expand?: string
-    batch?: number
-  }): Promise<Array<Record<string, unknown>>>
+    page: number
+    perPage: number
+  }): Promise<CollectionPage<Record<string, unknown>>>
   get(id: string): Promise<Record<string, unknown>>
   create(data: Record<string, unknown>): Promise<Record<string, unknown>>
   update(id: string, data: Record<string, unknown>): Promise<Record<string, unknown>>
@@ -188,13 +197,15 @@ export async function authenticate(): Promise<void> {
   if (workspaceId) {
     const userId = getAuthUserId()
     if (!userId) throw new Error('Could not determine authenticated user ID')
-    const members = await client.collection('workspace_members').list({
+    const members = await client.collection('workspace_members').listPage({
       filter: client.filter('workspace_id = {:wid} && user_id = {:uid}', { wid: workspaceId, uid: userId }),
+      page: 1,
+      perPage: 1,
     })
-    if (!members.length) {
+    if (!members.items.length) {
       throw new Error(`Authenticated user ${userId} is not a member of workspace ${workspaceId}`)
     }
-    process.stderr.write(`Authenticated as ${userId} (role: ${members[0]['role']})\n`)
+    process.stderr.write(`Authenticated as ${userId} (role: ${members.items[0]['role']})\n`)
   }
 }
 
@@ -208,12 +219,33 @@ function getAuthUserId(): string | null {
 // ── Object CRUD ──────────────────────────────────────────────────────────────
 
 export async function listObjects(workspaceId: string, type?: string): Promise<AuroraObjectRecord[]> {
+  return (await listObjectsPage(workspaceId, type, 1, 50)).items
+}
+
+export async function listObjectsPage(
+  workspaceId: string,
+  type: string | undefined,
+  page: number,
+  perPage: number,
+): Promise<CollectionPage<AuroraObjectRecord>> {
+  if (!Number.isInteger(page) || page < 1) throw new Error('page must be a positive integer')
+  if (!Number.isInteger(perPage) || perPage < 1 || perPage > 50) {
+    throw new Error('perPage must be an integer between 1 and 50')
+  }
   const client = getAuroraClient()
   const filter = type
     ? client.filter('workspace_id = {:wid} && is_deleted = false && type = {:type}', { wid: workspaceId, type })
     : client.filter('workspace_id = {:wid} && is_deleted = false', { wid: workspaceId })
-  const records = await client.collection('objects').list({ filter, sort: '-updated_at' })
-  return records.map(mapObject)
+  const result = await client.collection('objects').listPage({ filter, sort: '-updated_at', page, perPage })
+  return { ...result, items: result.items.map(mapObject) }
+}
+
+export async function searchObjectsPage(
+  workspaceId: string,
+  query: string,
+  limit: number,
+): Promise<WorkspaceKnowledgeSource[]> {
+  return searchWorkspaceKnowledgeServer(workspaceId, query, limit)
 }
 
 export async function getObject(id: string, workspaceId: string): Promise<AuroraObjectRecord | null> {
@@ -265,10 +297,12 @@ export async function getContent(objectId: string, workspaceId: string): Promise
 
   const client = getAuroraClient()
   try {
-    const records = await client.collection('content').list({
+    const records = await client.collection('content').listPage({
       filter: client.filter('object_id = {:id}', { id: objectId }),
+      page: 1,
+      perPage: 1,
     })
-    const r = records[0]
+    const r = records.items[0]
     if (!r) return null
     const json = r['content_json']
     if (!json) return null
@@ -283,10 +317,12 @@ export async function getContentJson(objectId: string, workspaceId: string): Pro
   if (!obj) return null
 
   const client = getAuroraClient()
-  const records = await client.collection('content').list({
+  const records = await client.collection('content').listPage({
     filter: client.filter('object_id = {:id}', { id: objectId }),
+    page: 1,
+    perPage: 1,
   })
-  const r = records[0]
+  const r = records.items[0]
   if (!r) return null
   const json = r['content_json']
   if (!json) return null
@@ -372,11 +408,13 @@ export async function setContent(
   if (!obj) throw new Error(`Object ${objectId} not found in this workspace`)
 
   const client = getAuroraClient()
-  const existing = await client.collection('content').list({
+  const existing = await client.collection('content').listPage({
     filter: client.filter('object_id = {:id}', { id: objectId }),
+    page: 1,
+    perPage: 1,
   })
-  if (existing.length > 0) {
-    await client.collection('content').update(String(existing[0].id), { content_json: contentJson })
+  if (existing.items.length > 0) {
+    await client.collection('content').update(String(existing.items[0].id), { content_json: contentJson })
   } else {
     await client.collection('content').create({ object_id: objectId, content_json: contentJson })
   }
@@ -412,8 +450,8 @@ export async function listProperties(objectIds: string[], workspaceId: string): 
     batch.forEach((id, idx) => { params[`id${idx}`] = id })
     const filter = client.filter(conditions.join(' || '), params)
 
-    const records = await client.collection('object_properties').list({ filter })
-    for (const r of records) {
+    const records = await client.collection('object_properties').listPage({ filter, page: 1, perPage: 50 })
+    for (const r of records.items) {
       results.push({
         id: r['id'] as string,
         object_id: r['object_id'] as string,
@@ -442,8 +480,10 @@ export async function upsertProperty(
   if (!obj) throw new Error(`Object ${objectId} not found in this workspace`)
 
   const client = getAuroraClient()
-  const existing = await client.collection('object_properties').list({
+  const existing = await client.collection('object_properties').listPage({
     filter: client.filter('object_id = {:oid} && key = {:key}', { oid: objectId, key }),
+    page: 1,
+    perPage: 1,
   })
   const valueField =
     valueType === 'number' ? 'value_num' :
@@ -455,8 +495,8 @@ export async function upsertProperty(
     valueType === 'boolean' ? (value === 'true') :
     value
 
-  if (existing.length > 0) {
-    await client.collection('object_properties').update(String(existing[0].id), { value_type: valueType, [valueField]: parsedValue })
+  if (existing.items.length > 0) {
+    await client.collection('object_properties').update(String(existing.items[0].id), { value_type: valueType, [valueField]: parsedValue })
   } else {
     await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: parsedValue })
   }
@@ -495,11 +535,13 @@ export async function listMembers(workspaceId: string): Promise<AuroraWorkspaceM
 export async function listTaskLists(workspaceId: string): Promise<AuroraTaskList[]> {
   const client = getAuroraClient()
   try {
-    const records = await client.collection('task_lists').list({
+    const records = await client.collection('task_lists').listPage({
       filter: client.filter('workspace_id = {:wid}', { wid: workspaceId }),
       sort: 'position',
+      page: 1,
+      perPage: 50,
     })
-    return records.map((r) => ({
+    return records.items.map((r) => ({
       id: r['id'] as string,
       name: r['name'] as string,
       default_status: (r['default_status'] as string | null) ?? null,
@@ -576,8 +618,10 @@ export async function updateTaskProps(
   const client = getAuroraClient()
   const upsert = async (key: string, valueType: string, value: string | number | boolean | null) => {
     if (value === null || value === '') return
-    const existing = await client.collection('object_properties').list({
+    const existing = await client.collection('object_properties').listPage({
       filter: client.filter('object_id = {:oid} && key = {:key}', { oid: objectId, key }),
+      page: 1,
+      perPage: 1,
     })
     const valueField =
       valueType === 'number' ? 'value_num' :
@@ -585,8 +629,8 @@ export async function updateTaskProps(
       valueType === 'boolean' ? 'value_bool' :
       valueType === 'ref' ? 'value_ref' :
       'value_text'
-    if (existing.length > 0) {
-      await client.collection('object_properties').update(String(existing[0].id), { value_type: valueType, [valueField]: value })
+    if (existing.items.length > 0) {
+      await client.collection('object_properties').update(String(existing.items[0].id), { value_type: valueType, [valueField]: value })
     } else {
       await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: value })
     }
@@ -860,21 +904,11 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
   }
 
   const collection = (name: string): BackendCollection => ({
-    async list(options: { filter?: string; sort?: string; expand?: string; batch?: number } = {}) {
-      const pageSize = options.batch ?? 500
-      const first = await request<{ items: Array<Record<string, unknown>>; totalPages: number }>(
-        `/api/collections/${name}/records?${toQueryString(1, pageSize, options)}`,
+    async listPage(options: { filter?: string; sort?: string; expand?: string; page: number; perPage: number }) {
+      return request<CollectionPage<Record<string, unknown>>>(
+        `/api/collections/${name}/records?${toQueryString(options.page, options.perPage, options)}`,
         { method: 'GET' },
       )
-      const items = [...first.items]
-      for (let page = 2; page <= (first.totalPages ?? 1); page += 1) {
-        const next = await request<{ items: Array<Record<string, unknown>> }>(
-          `/api/collections/${name}/records?${toQueryString(page, pageSize, options)}`,
-          { method: 'GET' },
-        )
-        items.push(...next.items)
-      }
-      return items
     },
     async get(id: string) {
       return request<Record<string, unknown>>(`/api/collections/${name}/records/${encodeURIComponent(id)}`, { method: 'GET' })
