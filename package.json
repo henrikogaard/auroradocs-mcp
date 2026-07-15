@@ -1,6 +1,6 @@
 {
   "name": "@henrikogard/auroradocs-mcp",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": false,
   "type": "module",
   "description": "AuroraCloud-first MCP server that exposes AuroraDocs workspace data to Claude Desktop and other AI agents",

@@ -5,7 +5,7 @@ import { validatePackageManifest } from './packageContentsCore.mjs'
 
 const validManifest = {
   name: '@henrikogard/auroradocs-mcp',
-  version: '0.1.1',
+  version: '0.2.0',
   bin: { 'aurora-mcp': 'dist/index.js' },
   paths: [
     'package.json',

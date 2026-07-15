@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-16
+
 ### Added
 
 - Added independently granted workspace discovery with explicit workspace
@@ -25,10 +27,11 @@ All notable changes to this project are documented in this file.
 - Redacted user, workspace, credential, and upstream response details from
   normal lifecycle diagnostics.
 
-### Deployment notes
+### Upgrade notes
 
+- Multi-workspace mode uses an `aur_mcp_client_...` credential plus explicit
+  owner-approved workspace grants. Existing legacy workspace tokens remain a
+  separate compatibility path; follow the migration guidance in `docs/setup.md`.
 - The companion AuroraCloud policy, client/grant, migration, and
-  project-context API work remains pending in
-  [AuroraDocs issue #557](https://github.com/henrikogaard/auroradocs/issues/557),
-  along with its migration, deployment, and live end-to-end verification.
-- Package version remains `0.1.1`; this unreleased work has not been published.
+  project-context APIs are deployed, and the production grant lifecycle has
+  passed end-to-end verification.

@@ -13,7 +13,7 @@ const REQUIRED_PATHS = [
 
 export function validatePackageManifest({ name, version, bin, paths }) {
   assert.equal(name, '@henrikogard/auroradocs-mcp', 'npm package name must be @henrikogard/auroradocs-mcp')
-  assert.equal(version, '0.1.1', 'npm package version must be 0.1.1')
+  assert.equal(version, '0.2.0', 'npm package version must be 0.2.0')
   assert.deepEqual(bin, { 'aurora-mcp': 'dist/index.js' }, 'npm executable mapping is incorrect')
 
   for (const requiredPath of REQUIRED_PATHS) {

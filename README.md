@@ -5,7 +5,7 @@ granted AuroraCloud workspaces. It runs on your computer over stdio and sends
 authenticated requests to `https://api.auroradocs.eu`.
 
 The public package is `@henrikogard/auroradocs-mcp`, the executable is
-`aurora-mcp`, and this documentation targets version `0.1.1`.
+`aurora-mcp`, and this documentation targets version `0.2.0`.
 
 For an end-to-end installation walkthrough, use the dedicated
 [Setup guide](docs/setup.md). Hermes and OpenClaw users should also apply the
@@ -82,7 +82,7 @@ in the knowledge-search recipe above.
 ## Configure a client
 
 All examples below use the production AuroraCloud API, a new client credential,
-and package version `0.1.1`. Replace `REDACTED` locally. Do not commit the
+and package version `0.2.0`. Replace `REDACTED` locally. Do not commit the
 resulting configuration. The examples store the token in the client's saved
 configuration, so protect that file as a credential.
 
@@ -111,7 +111,7 @@ this server under `mcpServers`, preserving any servers already present:
   "mcpServers": {
     "auroradocs": {
       "command": "npx",
-      "args": ["-y", "@henrikogard/auroradocs-mcp@0.1.1"],
+      "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.0"],
       "env": {
         "AURORA_API_URL": "https://api.auroradocs.eu",
         "AURORA_API_TOKEN": "REDACTED"
@@ -134,7 +134,7 @@ Options must appear before the server name:
 claude mcp add --transport stdio --scope user \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.1.1
+  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.0
 ```
 
 Run `claude mcp get auroradocs` to inspect the saved entry, then use `/mcp` in
@@ -149,7 +149,7 @@ The installed Codex CLI accepts `--env` for local stdio servers:
 codex mcp add \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.1.1
+  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.0
 ```
 
 Run `codex mcp get auroradocs` to inspect the saved entry.
@@ -161,7 +161,7 @@ Use this valid generic JSON shape when a client accepts an MCP server object:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "@henrikogard/auroradocs-mcp@0.1.1"],
+  "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.0"],
   "env": {
     "AURORA_API_URL": "https://api.auroradocs.eu",
     "AURORA_API_TOKEN": "REDACTED"

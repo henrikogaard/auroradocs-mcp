@@ -21,7 +21,7 @@ const requiredReadmeText = [
   'Revoke all active tokens',
   'E2EE',
   'stdio',
-  '@henrikogard/auroradocs-mcp@0.1.1',
+  '@henrikogard/auroradocs-mcp@0.2.0',
   'read:tasks',
   'write:tasks',
 ]
@@ -61,7 +61,7 @@ test('dedicated setup guide covers keys, clients, verification, and revocation',
     'Settings → Workspace → MCP Access',
     'shown only once',
     'read:objects',
-    '@henrikogard/auroradocs-mcp@0.1.1',
+    '@henrikogard/auroradocs-mcp@0.2.0',
     'Claude Desktop',
     'developer settings',
     'Claude Code',
@@ -189,7 +189,7 @@ test('public docs use only the canonical scoped npm package', async () => {
   ])
   const docs = documents.join('\n')
 
-  assert.match(docs, /npx -y @henrikogard\/auroradocs-mcp@0\.1\.1/)
+  assert.match(docs, /npx -y @henrikogard\/auroradocs-mcp@0\.2\.0/)
   assert.doesNotMatch(docs, /@henrikogaard\/auroradocs-mcp/)
   assert.doesNotMatch(docs, /npx -y auroradocs-mcp(?:@|\s|`)/)
 })
