@@ -1,10 +1,35 @@
+type JsonSchema = {
+  type?: string | string[]
+  const?: string
+  enum?: string[]
+  description?: string
+  minimum?: number
+  maximum?: number
+  properties?: Record<string, JsonSchema>
+  required?: string[]
+  items?: JsonSchema
+  oneOf?: JsonSchema[]
+  additionalProperties?: boolean | JsonSchema
+}
+
+export type JsonObjectSchema = JsonSchema & {
+  type: 'object'
+  properties: Record<string, JsonSchema>
+  required?: string[]
+  oneOf?: JsonObjectSchema[]
+}
+
 export type McpToolDefinition = {
   name: string
+  title: string
   description: string
-  inputSchema: {
-    type: 'object'
-    properties: Record<string, unknown>
-    required?: string[]
+  inputSchema: JsonObjectSchema
+  outputSchema: JsonObjectSchema
+  annotations: {
+    readOnlyHint: boolean
+    destructiveHint: boolean
+    idempotentHint: boolean
+    openWorldHint: boolean
   }
 }
 
@@ -37,6 +62,7 @@ export type McpWorkflowRecipe = {
 }
 
 const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
+  list_workspaces: 'read',
   search_objects: 'read',
   search: 'read',
   list_objects: 'read',
@@ -52,6 +78,8 @@ const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
   list_week_plan: 'read',
   schedule_task_block: 'write',
   read_canvas: 'read',
+  get_project_context: 'read',
+  list_project_changes: 'read',
   get_mcp_tool_coverage: 'read',
   get_mcp_workflow_recipes: 'read',
   create_object: 'write',
@@ -65,7 +93,482 @@ const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
   delete_object: 'write',
 }
 
-const TOOL_DEFINITIONS: McpToolDefinition[] = [
+const stringSchema: JsonSchema = { type: 'string' }
+const nullableStringSchema: JsonSchema = { type: ['string', 'null'] }
+
+function resultSchema(
+  type: string,
+  properties: Record<string, JsonSchema> = {},
+  required: string[] = [],
+): JsonObjectSchema {
+  return {
+    type: 'object',
+    properties: { type: { const: type }, ...properties },
+    required: ['type', ...required],
+    additionalProperties: false,
+  }
+}
+
+const SAFE_ERROR_SCHEMA = resultSchema('error', {
+  code: {
+    type: 'string',
+    enum: ['invalid_input', 'authentication_failed', 'permission_denied', 'not_found', 'rate_limited', 'network_error', 'server_error'],
+  },
+  message: stringSchema,
+  retryable: { type: 'boolean' },
+}, ['code', 'message', 'retryable'])
+
+const OBJECT_SUMMARY_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    id: stringSchema,
+    title: nullableStringSchema,
+    type: stringSchema,
+    icon: nullableStringSchema,
+  },
+  required: ['id', 'title', 'type', 'icon'],
+  additionalProperties: false,
+}
+
+const KNOWLEDGE_SOURCE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    sourceId: stringSchema,
+    workspaceId: stringSchema,
+    objectId: stringSchema,
+    kind: { type: 'string', enum: ['object', 'content_chunk', 'property', 'comment', 'attachment_metadata', 'relationship'] },
+    title: nullableStringSchema,
+    objectType: stringSchema,
+    icon: nullableStringSchema,
+    breadcrumb: { type: 'array', items: stringSchema },
+    deepLink: stringSchema,
+    snippet: nullableStringSchema,
+    plainText: nullableStringSchema,
+    blockId: nullableStringSchema,
+    updatedAt: stringSchema,
+    score: { type: ['number', 'null'] },
+    matchedFields: { type: 'array', items: { type: 'string', enum: ['title', 'content', 'properties', 'relationships'] } },
+    availability: { type: 'string', enum: ['available', 'encrypted_locked', 'not_indexed', 'unsupported_type', 'permission_denied'] },
+    relationships: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['parent', 'child', 'link', 'backlink', 'tag', 'task_project'] },
+          objectId: stringSchema,
+          title: nullableStringSchema,
+        },
+        required: ['type', 'objectId', 'title'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: [
+    'sourceId', 'workspaceId', 'objectId', 'kind', 'title', 'objectType', 'icon', 'breadcrumb',
+    'deepLink', 'snippet', 'plainText', 'blockId', 'updatedAt', 'score', 'matchedFields',
+    'availability', 'relationships',
+  ],
+  additionalProperties: false,
+}
+
+const WEEK_PLAN_TASK_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    id: stringSchema,
+    title: nullableStringSchema,
+    status: nullableStringSchema,
+    due_date: nullableStringSchema,
+    updated_at: nullableStringSchema,
+    labels: { type: 'array', items: stringSchema },
+    timeBlock: {
+      type: 'object',
+      properties: { isTimeBlock: { type: 'boolean' }, durationMinutes: { type: ['number', 'null'] } },
+      required: ['isTimeBlock', 'durationMinutes'],
+      additionalProperties: false,
+    },
+  },
+  required: ['id', 'title', 'status', 'due_date', 'updated_at', 'labels', 'timeBlock'],
+  additionalProperties: false,
+}
+
+const WEEK_PLAN_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    type: { const: 'week_plan' },
+    range: {
+      type: 'object',
+      properties: { start: stringSchema, end: stringSchema },
+      required: ['start', 'end'],
+      additionalProperties: false,
+    },
+    days: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { date: stringSchema, tasks: { type: 'array', items: WEEK_PLAN_TASK_SCHEMA } },
+        required: ['date', 'tasks'],
+        additionalProperties: false,
+      },
+    },
+    unscheduled: { type: 'array', items: WEEK_PLAN_TASK_SCHEMA },
+  },
+  required: ['type', 'range', 'days', 'unscheduled'],
+  additionalProperties: false,
+}
+
+const CANVAS_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    type: { const: 'canvas' },
+    canvas: {
+      type: 'object',
+      properties: { id: stringSchema, title: nullableStringSchema },
+      required: ['id', 'title'],
+      additionalProperties: false,
+    },
+    cards: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: stringSchema,
+          type: stringSchema,
+          x: { type: ['number', 'null'] },
+          y: { type: ['number', 'null'] },
+          width: { type: ['number', 'null'] },
+          height: { type: ['number', 'null'] },
+          text: nullableStringSchema,
+          color: nullableStringSchema,
+          objectId: nullableStringSchema,
+          objectTitle: nullableStringSchema,
+        },
+        required: ['id', 'type', 'x', 'y', 'width', 'height', 'text', 'color', 'objectId', 'objectTitle'],
+        additionalProperties: false,
+      },
+    },
+    edges: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: stringSchema,
+          fromCard: nullableStringSchema,
+          toCard: nullableStringSchema,
+          fromSide: nullableStringSchema,
+          toSide: nullableStringSchema,
+          label: nullableStringSchema,
+          color: nullableStringSchema,
+          style: nullableStringSchema,
+          arrow: nullableStringSchema,
+          arrowMode: nullableStringSchema,
+          strokeWidth: { type: ['number', 'null'] },
+        },
+        required: ['id', 'fromCard', 'toCard', 'fromSide', 'toSide', 'label', 'color', 'style', 'arrow', 'arrowMode', 'strokeWidth'],
+        additionalProperties: false,
+      },
+    },
+    frames: { type: 'array', items: { type: 'object' } },
+    warnings: { type: 'array', items: stringSchema },
+  },
+  required: ['type', 'canvas', 'cards', 'edges', 'frames', 'warnings'],
+  additionalProperties: false,
+}
+
+const COVERAGE_AUDIT_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    generatedAt: stringSchema,
+    areas: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: stringSchema,
+          label: stringSchema,
+          status: { type: 'string', enum: ['covered', 'partial', 'gap'] },
+          implementedTools: { type: 'array', items: stringSchema },
+          missingTools: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                name: stringSchema,
+                priority: { type: 'string', enum: ['high', 'medium', 'low'] },
+                reason: stringSchema,
+              },
+              required: ['name', 'priority', 'reason'],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ['id', 'label', 'status', 'implementedTools', 'missingTools'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['generatedAt', 'areas'],
+  additionalProperties: false,
+}
+
+const WORKFLOW_RECIPE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    id: stringSchema,
+    title: stringSchema,
+    goal: stringSchema,
+    requiredScopes: { type: 'array', items: stringSchema },
+    toolSteps: { type: 'array', items: stringSchema },
+    prompt: stringSchema,
+  },
+  required: ['id', 'title', 'goal', 'requiredScopes', 'toolSteps', 'prompt'],
+  additionalProperties: false,
+}
+
+const PROJECT_WORKSPACE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, name: stringSchema },
+  required: ['id', 'name'],
+  additionalProperties: false,
+}
+
+const PROJECT_IDENTITY_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, workspaceId: stringSchema, title: stringSchema },
+  required: ['id', 'workspaceId', 'title'],
+  additionalProperties: false,
+}
+
+const PROJECT_AVAILABILITY_SCHEMA: JsonSchema = {
+  type: 'string',
+  enum: ['available', 'empty', 'encrypted_locked', 'permission_denied', 'not_found', 'unavailable', 'not_indexed', 'unsupported_type'],
+}
+
+const PROJECT_CHANGE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, type: stringSchema, title: nullableStringSchema, updatedAt: stringSchema },
+  required: ['id', 'type', 'title', 'updatedAt'],
+  additionalProperties: false,
+}
+
+const PROJECT_ACTIVITY_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, title: nullableStringSchema, updatedAt: stringSchema },
+  required: ['id', 'title', 'updatedAt'],
+  additionalProperties: false,
+}
+
+const PROJECT_TASK_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, title: stringSchema, status: nullableStringSchema, updatedAt: stringSchema },
+  required: ['id', 'title', 'status', 'updatedAt'],
+  additionalProperties: false,
+}
+
+const PROJECT_CITATION_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    sourceId: stringSchema,
+    title: nullableStringSchema,
+    deepLink: stringSchema,
+    updatedAt: stringSchema,
+    availability: PROJECT_AVAILABILITY_SCHEMA,
+  },
+  required: ['sourceId', 'title', 'deepLink', 'updatedAt', 'availability'],
+  additionalProperties: false,
+}
+
+const PROJECT_RESUME_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    ...PROJECT_IDENTITY_SCHEMA.properties,
+    goal: nullableStringSchema,
+    status: nullableStringSchema,
+    priority: nullableStringSchema,
+    owner: nullableStringSchema,
+    progress: { type: ['number', 'null'], minimum: 0, maximum: 100 },
+    startDate: nullableStringSchema,
+    dueDate: nullableStringSchema,
+    brief: {
+      type: 'object',
+      properties: { availability: PROJECT_AVAILABILITY_SCHEMA, text: nullableStringSchema },
+      required: ['availability', 'text'],
+      additionalProperties: false,
+    },
+    tasks: {
+      type: 'object',
+      properties: {
+        availability: PROJECT_AVAILABILITY_SCHEMA,
+        groups: {
+          type: 'object',
+          properties: {
+            todo: { type: 'array', items: PROJECT_TASK_SCHEMA },
+            in_progress: { type: 'array', items: PROJECT_TASK_SCHEMA },
+            blocked: { type: 'array', items: PROJECT_TASK_SCHEMA },
+            done: { type: 'array', items: PROJECT_TASK_SCHEMA },
+          },
+          required: ['todo', 'in_progress', 'blocked', 'done'],
+          additionalProperties: false,
+        },
+      },
+      required: ['availability', 'groups'],
+      additionalProperties: false,
+    },
+    blockers: { type: 'array', items: stringSchema },
+    risks: { type: 'array', items: stringSchema },
+    unresolvedDecisions: { type: 'array', items: stringSchema },
+    recentActivity: { type: 'array', items: PROJECT_ACTIVITY_SCHEMA },
+    nextActions: { type: 'array', items: stringSchema },
+    sources: { type: 'array', items: PROJECT_CITATION_SCHEMA },
+  },
+  required: [
+    'id', 'workspaceId', 'title', 'goal', 'status', 'priority', 'owner', 'progress', 'startDate', 'dueDate',
+    'brief', 'tasks', 'blockers', 'risks', 'unresolvedDecisions', 'recentActivity', 'nextActions', 'sources',
+  ],
+  additionalProperties: false,
+}
+
+const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
+  list_workspaces: [resultSchema('workspaces', {
+    workspaces: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          workspaceId: stringSchema,
+          alias: stringSchema,
+          name: stringSchema,
+          role: stringSchema,
+          scopes: { type: 'array', items: stringSchema },
+          grantId: stringSchema,
+          expiresAt: nullableStringSchema,
+        },
+        required: ['workspaceId', 'alias', 'name', 'role', 'scopes', 'grantId', 'expiresAt'],
+        additionalProperties: false,
+      },
+    },
+  }, ['workspaces'])],
+  search_objects: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
+  search: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
+  list_objects: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
+  list_recent: [resultSchema('objects', { objects: { type: 'array', items: OBJECT_SUMMARY_SCHEMA } }, ['objects'])],
+  wiki_search: [resultSchema('knowledge_sources', { sources: { type: 'array', items: KNOWLEDGE_SOURCE_SCHEMA } }, ['sources'])],
+  wiki_get_page: [resultSchema('knowledge_sources', { sources: { type: 'array', items: KNOWLEDGE_SOURCE_SCHEMA } }, ['sources'])],
+  wiki_related: [resultSchema('knowledge_sources', { sources: { type: 'array', items: KNOWLEDGE_SOURCE_SCHEMA } }, ['sources'])],
+  wiki_recent: [resultSchema('knowledge_sources', { sources: { type: 'array', items: KNOWLEDGE_SOURCE_SCHEMA } }, ['sources'])],
+  get_object: [resultSchema('object', {
+    object: OBJECT_SUMMARY_SCHEMA,
+    availability: { type: 'string', enum: ['available', 'empty', 'encrypted_locked', 'permission_denied', 'not_found', 'unavailable'] },
+    content: nullableStringSchema,
+    properties: { type: 'object', additionalProperties: stringSchema },
+  }, ['object', 'availability', 'content', 'properties'])],
+  list_workspace_members: [resultSchema('members', {
+    members: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: stringSchema, name: nullableStringSchema, email: stringSchema, role: stringSchema },
+        required: ['id', 'name', 'email', 'role'],
+        additionalProperties: false,
+      },
+    },
+  }, ['members'])],
+  list_task_lists: [resultSchema('task_lists', {
+    task_lists: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: stringSchema, name: stringSchema },
+        required: ['id', 'name'],
+        additionalProperties: false,
+      },
+    },
+  }, ['task_lists'])],
+  list_task_statuses: [resultSchema('task_statuses', { statuses: { type: 'array', items: stringSchema } }, ['statuses'])],
+  list_week_plan: [resultSchema('week_plan', { plan: WEEK_PLAN_SCHEMA }, ['plan'])],
+  schedule_task_block: [resultSchema('scheduled_task_block', {
+    id: stringSchema,
+    title: nullableStringSchema,
+    due_date: stringSchema,
+    mode: stringSchema,
+  }, ['id', 'title', 'due_date', 'mode'])],
+  read_canvas: [resultSchema('canvas', { canvas: CANVAS_SCHEMA }, ['canvas'])],
+  get_mcp_tool_coverage: [resultSchema('mcp_tool_coverage', { audit: COVERAGE_AUDIT_SCHEMA }, ['audit'])],
+  get_mcp_workflow_recipes: [resultSchema('mcp_workflow_recipes', { recipes: { type: 'array', items: WORKFLOW_RECIPE_SCHEMA } }, ['recipes'])],
+  get_project_context: [
+    resultSchema('project_context', {
+      status: { const: 'ok' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      project: PROJECT_RESUME_SCHEMA,
+      asOf: stringSchema,
+      cursor: nullableStringSchema,
+    }, ['status', 'workspace', 'project', 'asOf', 'cursor']),
+    resultSchema('project_context', {
+      status: { const: 'ambiguous' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      candidates: { type: 'array', items: PROJECT_IDENTITY_SCHEMA },
+      asOf: stringSchema,
+    }, ['status', 'workspace', 'candidates', 'asOf']),
+    resultSchema('project_context', {
+      status: { const: 'not_found' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      asOf: stringSchema,
+    }, ['status', 'workspace', 'asOf']),
+  ],
+  list_project_changes: [
+    resultSchema('project_changes', {
+      status: { const: 'ok' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      project: PROJECT_IDENTITY_SCHEMA,
+      asOf: stringSchema,
+      items: { type: 'array', items: PROJECT_CHANGE_SCHEMA },
+      nextCursor: nullableStringSchema,
+      hasMore: { type: 'boolean' },
+    }, ['status', 'workspace', 'project', 'asOf', 'items', 'nextCursor', 'hasMore']),
+    resultSchema('project_changes', {
+      status: { const: 'not_found' },
+      workspace: PROJECT_WORKSPACE_SCHEMA,
+      asOf: stringSchema,
+    }, ['status', 'workspace', 'asOf']),
+  ],
+  create_object: [resultSchema('created', { id: stringSchema, title: stringSchema }, ['id', 'title'])],
+  create_task: [resultSchema('task_created', {
+    id: stringSchema,
+    title: stringSchema,
+    status: nullableStringSchema,
+    task_list_name: nullableStringSchema,
+  }, ['id', 'title', 'status', 'task_list_name'])],
+  update_task: [resultSchema('task_updated', {
+    id: stringSchema,
+    title: stringSchema,
+    changed_fields: { type: 'array', items: stringSchema },
+  }, ['id', 'title', 'changed_fields'])],
+  update_object_title: [resultSchema('updated', { id: stringSchema, title: stringSchema }, ['id', 'title'])],
+  update_object: [
+    resultSchema('object_updated', { id: stringSchema, changed_fields: { type: 'array', items: stringSchema } }, ['id', 'changed_fields']),
+    resultSchema('no_op', { message: stringSchema }, ['message']),
+  ],
+  set_content: [resultSchema('content_set', { id: stringSchema }, ['id'])],
+  append_block: [resultSchema('content_appended', { id: stringSchema }, ['id'])],
+  set_property: [resultSchema('property_set', {
+    objectId: stringSchema,
+    key: stringSchema,
+    value: stringSchema,
+  }, ['objectId', 'key', 'value'])],
+  delete_object: [resultSchema('deleted', { id: stringSchema }, ['id'])],
+}
+
+const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block'])
+const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+const WORKSPACE_SELECTOR_FREE_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+
+type McpToolDeclaration = Omit<McpToolDefinition, 'title' | 'outputSchema' | 'annotations'>
+
+const TOOL_DEFINITIONS: McpToolDeclaration[] = [
+  {
+    name: 'list_workspaces',
+    description: 'List only the AuroraDocs workspaces granted to this MCP credential.',
+    inputSchema: { type: 'object', properties: {} },
+  },
   {
     name: 'search_objects',
     description: 'Search for objects (pages, notes, tasks, etc.) in the workspace by title keyword.',
@@ -74,6 +577,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {
         query: { type: 'string', description: 'Keyword to search for in object titles' },
         type: { type: 'string', description: 'Optional object type filter (page, note, task, etc.)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 10, max 50)' },
       },
       required: ['query'],
     },
@@ -86,6 +590,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {
         query: { type: 'string', description: 'Keyword to search for in object titles' },
         type: { type: 'string', description: 'Optional object type filter (page, note, task, etc.)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 10, max 50)' },
       },
       required: ['query'],
     },
@@ -97,7 +602,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         type: { type: 'string', description: 'Optional object type to filter by' },
-        limit: { type: 'number', description: 'Maximum results to return (default 20)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 20)' },
       },
     },
   },
@@ -108,7 +613,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         type: { type: 'string', description: 'Optional object type to filter by' },
-        limit: { type: 'number', description: 'Maximum results to return (default 20)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 20)' },
       },
     },
   },
@@ -119,7 +624,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query to run against workspace knowledge' },
-        limit: { type: 'number', description: 'Maximum results to return (default 20, max 50)' },
+        limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum results to return (default 20, max 50)' },
       },
       required: ['query'],
     },
@@ -143,7 +648,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         id: { type: 'string', description: 'The object ID' },
-        limit: { type: 'number', description: 'Maximum results to return (default 6, max 10)' },
+        limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Maximum results to return (default 6, max 10)' },
       },
       required: ['id'],
     },
@@ -154,7 +659,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: { type: 'number', description: 'Maximum results to return (default 6, max 10)' },
+        limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Maximum results to return (default 6, max 10)' },
       },
     },
   },
@@ -192,7 +697,7 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
       properties: {
         anchor_date: { type: 'string', description: 'Date inside the requested week, formatted YYYY-MM-DD. Defaults to today.' },
         include_unscheduled: { type: 'boolean', description: 'Include incomplete tasks without a due date. Defaults to true.' },
-        unscheduled_limit: { type: 'number', description: 'Maximum unscheduled tasks to return. Defaults to 12, max 50.' },
+        unscheduled_limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum unscheduled tasks to return. Defaults to 12, max 50.' },
       },
     },
   },
@@ -233,6 +738,37 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
     name: 'get_mcp_workflow_recipes',
     description: 'Return documented agent workflow recipes and the MCP tools/scopes they use.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_project_context',
+    description: 'Resume planning work with a bounded project packet containing tasks, blockers, next actions, and citations.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Exact project object ID; cannot be combined with query' },
+        query: { type: 'string', description: 'Project title query; cannot be combined with project_id' },
+        activity_days: { type: 'integer', minimum: 1, maximum: 90, description: 'Recent activity window in days (default 14)' },
+        task_limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum project tasks (default 20)' },
+        source_limit: { type: 'integer', minimum: 1, maximum: 25, description: 'Maximum citation sources (default 10)' },
+      },
+      oneOf: [
+        { type: 'object', properties: { project_id: stringSchema }, required: ['project_id'] },
+        { type: 'object', properties: { query: stringSchema }, required: ['query'] },
+      ],
+    },
+  },
+  {
+    name: 'list_project_changes',
+    description: 'List bounded project changes after an opaque cursor.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: 'Exact project object ID' },
+        cursor: { type: 'string', description: 'Opaque cursor returned by project context or a previous change page' },
+        limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Maximum changes to return (default 50)' },
+      },
+      required: ['project_id', 'cursor'],
+    },
   },
   {
     name: 'create_object',
@@ -364,10 +900,28 @@ const TOOL_DEFINITIONS: McpToolDefinition[] = [
 export function getToolDefinitions(): McpToolDefinition[] {
   return TOOL_DEFINITIONS.map((tool) => ({
     ...tool,
+    title: tool.name.split('_').map((word) => word[0]?.toUpperCase() + word.slice(1)).join(' '),
     inputSchema: {
       ...tool.inputSchema,
-      properties: { ...tool.inputSchema.properties },
+      properties: {
+        ...tool.inputSchema.properties,
+        ...(WORKSPACE_SELECTOR_FREE_TOOLS.has(tool.name) ? {} : {
+          workspace_id: { type: 'string', description: 'Granted workspace ID to use for this operation' },
+          workspace_alias: { type: 'string', description: 'Granted workspace alias to use for this operation' },
+        }),
+      },
       required: tool.inputSchema.required ? [...tool.inputSchema.required] : undefined,
+    },
+    outputSchema: structuredClone({
+      type: 'object' as const,
+      properties: {},
+      oneOf: [...(RESULT_SCHEMAS[tool.name] ?? []), SAFE_ERROR_SCHEMA],
+    }),
+    annotations: {
+      readOnlyHint: TOOL_EFFECTS[tool.name] === 'read',
+      destructiveHint: tool.name === 'delete_object',
+      idempotentHint: !NON_IDEMPOTENT_TOOLS.has(tool.name),
+      openWorldHint: !LOCAL_TOOLS.has(tool.name),
     },
   }))
 }

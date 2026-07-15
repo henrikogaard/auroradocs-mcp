@@ -38,14 +38,23 @@ tokens, credentials, workspace IDs, workspace contents, private links, or
 production user data.
 
 The `auroracloud-live-smoke` script is optional and intentionally separate. It
-requires an `aur_mcp_` token scoped only to `read:objects`, `read:content`, and
-`search`. Do not grant it `tasks`: that scope authorizes both task reads and task
-writes. The smoke authenticates, verifies membership, lists tools, members, and
-objects, and reads the recent knowledge catalog. It rejects any tool that is not
-authoritatively classified as read-only before dispatch and does not create,
-update, or delete workspace data. Run it only against a workspace you explicitly
-chose for testing; pass all credentials through your local environment and never
-preserve its raw output in the repository.
+requires `AURORA_API_URL` and `AURORA_API_TOKEN`. Prefer an
+`aur_mcp_client_...` credential with an owner-approved workspace grant. A legacy
+`aur_mcp_...` token remains supported but also requires
+`AURORA_WORKSPACE_ID`. Give either credential only `read:objects`; add optional
+`read:content` only when the project context needs readable briefs or citations.
+Do not grant write or task scopes.
+
+The smoke always calls `list_workspaces`. Set `AURORA_SMOKE_PROJECT_ID` only
+when you want one bounded `get_project_context` request. Without it, the smoke
+proves discovery and exits without guessing a project. If a client credential
+has multiple workspace grants, set `AURORA_SMOKE_WORKSPACE_ID` to select the
+grant for that project check. The dispatcher rejects any tool that is not
+authoritatively classified as read-only and never dispatches a write tool.
+
+Pass credentials through your protected local environment, never a committed
+file or recorded shell command. Do not preserve raw smoke output in the
+repository.
 
 ## Pull requests
 

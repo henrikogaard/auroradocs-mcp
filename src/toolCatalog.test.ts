@@ -11,6 +11,128 @@ import {
 } from './toolCatalog.js'
 import { executeToolCall, formatToolResult } from './tools.js'
 import { resetAuroraClientForTests } from './auroraClient.js'
+import type { AuroraConnectionContext } from './contracts.js'
+
+const multiWorkspaceContext: AuroraConnectionContext = {
+  kind: 'client',
+  workspaces: [
+    { workspaceId: 'workspace-a1b2', alias: 'henrik-pkm-a1b2', name: 'Henrik PKM', role: 'owner', scopes: ['read:objects'], grantId: 'grant-1', expiresAt: '2026-10-01T00:00:00.000Z' },
+    { workspaceId: 'workspace-c3d4', alias: 'aurora-work-c3d4', name: 'Aurora Work', role: 'editor', scopes: ['read:objects'], grantId: 'grant-2', expiresAt: null },
+  ],
+}
+
+test('list_workspaces exposes only the granted workspace contract', async () => {
+  assert.deepEqual(await executeToolCall('list_workspaces', {}, multiWorkspaceContext), {
+    type: 'workspaces',
+    workspaces: multiWorkspaceContext.workspaces,
+  })
+})
+
+test('list_workspaces output schema accepts expiring and non-expiring grants', () => {
+  const definition = getToolDefinitions().find((tool) => tool.name === 'list_workspaces')
+  assert(definition)
+  const success = definition.outputSchema.oneOf?.find((variant) => variant.properties?.['type']?.const === 'workspaces')
+  const workspaces = success?.properties?.['workspaces'] as { items?: { properties?: Record<string, unknown> } } | undefined
+  assert.deepEqual(workspaces?.items?.properties?.['expiresAt'], {
+    type: ['string', 'null'],
+  })
+})
+
+test('client mode requires an unambiguous workspace selector before a data request', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  let requestCount = 0
+  const server = createServer((_req, res) => {
+    requestCount += 1
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ items: [] }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    assert.deepEqual(await executeToolCall('list_objects', { limit: 10 }, multiWorkspaceContext), {
+      type: 'error', code: 'invalid_input', message: 'workspace_id or workspace_alias is required', retryable: false,
+    })
+    assert.deepEqual(await executeToolCall('list_objects', { workspace_alias: 'missing' }, multiWorkspaceContext), {
+      type: 'error', code: 'invalid_input', message: 'Workspace selector does not match an available grant', retryable: false,
+    })
+    assert.deepEqual(await executeToolCall('list_objects', { workspace_id: 'workspace-a1b2', workspace_alias: 'henrik-pkm-a1b2' }, multiWorkspaceContext), {
+      type: 'error', code: 'invalid_input', message: 'workspace_id and workspace_alias cannot be used together', retryable: false,
+    })
+    assert.equal(requestCount, 0)
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
+test('legacy mode defaults to its configured workspace and rejects a different selector', async () => {
+  const context: AuroraConnectionContext = { kind: 'legacy_workspace', defaultWorkspaceId: 'workspace-1', workspaces: [] }
+  assert.deepEqual(await executeToolCall('list_objects', { workspace_id: 'workspace-2' }, context), {
+    type: 'error', code: 'invalid_input', message: 'Legacy credentials are restricted to the configured workspace', retryable: false,
+  })
+})
+
+test('legacy mode rejects malformed explicit selectors before reads or mutations', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  let requestCount = 0
+  const server = createServer((_req, res) => {
+    requestCount += 1
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ items: [] }))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+  const context: AuroraConnectionContext = { kind: 'legacy_workspace', defaultWorkspaceId: 'workspace-1', workspaces: [] }
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    assert.deepEqual(await executeToolCall('list_objects', { workspace_id: 42 }, context), {
+      type: 'error', code: 'invalid_input', message: 'workspace_id must be a non-empty string', retryable: false,
+    })
+    assert.deepEqual(await executeToolCall('list_objects', { workspace_alias: '   ' }, context), {
+      type: 'error', code: 'invalid_input', message: 'workspace_alias must be a non-empty string', retryable: false,
+    })
+    assert.deepEqual(await executeToolCall('update_object_title', {
+      id: 'object-1',
+      title: 'Must not mutate',
+      workspace_id: 'workspace-1',
+      workspace_alias: '   ',
+    }, context), {
+      type: 'error', code: 'invalid_input', message: 'workspace_id and workspace_alias cannot be used together', retryable: false,
+    })
+    assert.equal(requestCount, 0)
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
+test('every data tool accepts optional workspace selectors while list_workspaces does not', () => {
+  const definitions = getToolDefinitions()
+  const excluded = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+  for (const tool of definitions) {
+    if (excluded.has(tool.name)) {
+      assert.equal(tool.inputSchema.properties['workspace_id'], undefined, tool.name)
+      assert.equal(tool.inputSchema.properties['workspace_alias'], undefined, tool.name)
+    } else {
+      assert.equal(tool.inputSchema.properties['workspace_id']?.type, 'string', tool.name)
+      assert.equal(tool.inputSchema.properties['workspace_alias']?.type, 'string', tool.name)
+    }
+  }
+})
 
 test('MCP tool catalog exposes planning and canvas coverage with priorities', () => {
   const audit = getMcpToolCoverageAudit()
@@ -51,6 +173,7 @@ test('MCP catalog tools are registered and formatted as read-only results', asyn
 
 test('MCP tool catalog authoritatively classifies every registered tool effect', () => {
   const expected = {
+    list_workspaces: 'read',
     search_objects: 'read',
     search: 'read',
     list_objects: 'read',
@@ -66,6 +189,8 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
     list_week_plan: 'read',
     schedule_task_block: 'write',
     read_canvas: 'read',
+    get_project_context: 'read',
+    list_project_changes: 'read',
     get_mcp_tool_coverage: 'read',
     get_mcp_workflow_recipes: 'read',
     create_object: 'write',
@@ -85,10 +210,205 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
   assert.equal(getToolEffect('unknown_tool'), undefined)
 })
 
+test('every tool declares output schema and accurate effect annotations', () => {
+  const localReadTools = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+  const nonIdempotentTools = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block'])
+  const successResultTypes: Record<string, string[]> = {
+    list_workspaces: ['workspaces'],
+    search_objects: ['objects'],
+    search: ['objects'],
+    list_objects: ['objects'],
+    list_recent: ['objects'],
+    wiki_search: ['knowledge_sources'],
+    wiki_get_page: ['knowledge_sources'],
+    wiki_related: ['knowledge_sources'],
+    wiki_recent: ['knowledge_sources'],
+    get_object: ['object'],
+    list_workspace_members: ['members'],
+    list_task_lists: ['task_lists'],
+    list_task_statuses: ['task_statuses'],
+    list_week_plan: ['week_plan'],
+    schedule_task_block: ['scheduled_task_block'],
+    read_canvas: ['canvas'],
+    get_project_context: ['project_context', 'project_context', 'project_context'],
+    list_project_changes: ['project_changes', 'project_changes'],
+    get_mcp_tool_coverage: ['mcp_tool_coverage'],
+    get_mcp_workflow_recipes: ['mcp_workflow_recipes'],
+    create_object: ['created'],
+    create_task: ['task_created'],
+    update_task: ['task_updated'],
+    update_object_title: ['updated'],
+    update_object: ['object_updated', 'no_op'],
+    set_content: ['content_set'],
+    append_block: ['content_appended'],
+    set_property: ['property_set'],
+    delete_object: ['deleted'],
+  }
+
+  for (const tool of getToolDefinitions()) {
+    const isReadOnly = getToolEffect(tool.name) === 'read'
+
+    assert.equal(typeof tool.title, 'string', `${tool.name} must declare a title`)
+    assert.equal(tool.outputSchema.type, 'object', `${tool.name} must declare an object output schema`)
+    assert.equal(typeof tool.annotations.readOnlyHint, 'boolean')
+    assert.equal(typeof tool.annotations.destructiveHint, 'boolean')
+    assert.equal(typeof tool.annotations.idempotentHint, 'boolean')
+    assert.equal(typeof tool.annotations.openWorldHint, 'boolean')
+    assert.equal(tool.annotations.readOnlyHint, isReadOnly, `${tool.name} readOnlyHint`)
+    assert.equal(tool.annotations.destructiveHint, tool.name === 'delete_object', `${tool.name} destructiveHint`)
+    assert.equal(tool.annotations.idempotentHint, !nonIdempotentTools.has(tool.name), `${tool.name} idempotentHint`)
+    assert.equal(tool.annotations.openWorldHint, !localReadTools.has(tool.name), `${tool.name} openWorldHint`)
+
+    const variants = tool.outputSchema.oneOf ?? []
+    assert.ok(variants.some((variant) => variant.properties?.['type']?.const === 'error'), `${tool.name} must accept safe errors`)
+    assert.deepEqual(
+      variants
+        .map((variant) => variant.properties?.['type']?.const)
+        .filter((type) => type !== 'error'),
+      successResultTypes[tool.name],
+      `${tool.name} success result variants`,
+    )
+  }
+})
+
+test('MCP tool catalog declares bounded integer schemas for count inputs', () => {
+  const definitions = new Map(getToolDefinitions().map((tool) => [tool.name, tool]))
+  const property = (tool: string, key: string) =>
+    definitions.get(tool)?.inputSchema.properties[key]
+
+  for (const tool of ['list_objects', 'list_recent', 'wiki_search']) {
+    assert.deepEqual(property(tool, 'limit'), {
+      type: 'integer',
+      minimum: 1,
+      maximum: 50,
+      description: definitions.get(tool)?.inputSchema.properties['limit'] &&
+        (definitions.get(tool)?.inputSchema.properties['limit'] as { description: string }).description,
+    })
+  }
+  for (const tool of ['wiki_related', 'wiki_recent']) {
+    assert.deepEqual(property(tool, 'limit'), {
+      type: 'integer',
+      minimum: 1,
+      maximum: 10,
+      description: definitions.get(tool)?.inputSchema.properties['limit'] &&
+        (definitions.get(tool)?.inputSchema.properties['limit'] as { description: string }).description,
+    })
+  }
+  assert.deepEqual(property('list_week_plan', 'unscheduled_limit'), {
+    type: 'integer',
+    minimum: 1,
+    maximum: 50,
+    description: (property('list_week_plan', 'unscheduled_limit') as { description: string }).description,
+  })
+  for (const [tool, key, maximum] of [
+    ['get_project_context', 'activity_days', 90],
+    ['get_project_context', 'task_limit', 50],
+    ['get_project_context', 'source_limit', 25],
+    ['list_project_changes', 'limit', 100],
+  ] as const) {
+    assert.equal(property(tool, key)?.type, 'integer')
+    assert.equal(property(tool, key)?.minimum, 1)
+    assert.equal(property(tool, key)?.maximum, maximum)
+  }
+})
+
+test('get_project_context does not publish a continuation cursor input', () => {
+  const definition = getToolDefinitions().find((tool) => tool.name === 'get_project_context')
+  assert(definition)
+  assert.equal(definition.inputSchema.properties['cursor'], undefined)
+  const changes = getToolDefinitions().find((tool) => tool.name === 'list_project_changes')
+  assert(changes)
+  assert.equal(changes.inputSchema.properties['cursor']?.type, 'string')
+  assert.ok(changes.inputSchema.required?.includes('cursor'))
+})
+
+test('list_objects rejects an invalid limit before network access', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  let requestCount = 0
+  const server = createServer((_req, res) => {
+    requestCount += 1
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ items: [], page: 1, perPage: 20, totalPages: 1, totalItems: 0 }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const result = await executeToolCall('list_objects', { workspace_id: 'workspace-1', limit: -1 }, 'workspace-1')
+
+    assert.deepEqual(result, {
+      type: 'error',
+      code: 'invalid_input',
+      message: 'limit must be an integer between 1 and 50',
+      retryable: false,
+    })
+    assert.equal(requestCount, 0)
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
 test('read_canvas validates required id before reading workspace content', async () => {
   const result = await executeToolCall('read_canvas', {}, 'workspace-1')
 
-  assert.deepEqual(result, { type: 'error', message: 'Canvas object ID is required' })
+  assert.deepEqual(result, {
+    type: 'error',
+    code: 'invalid_input',
+    message: 'Canvas object ID is required',
+    retryable: false,
+  })
+})
+
+test('read_canvas classifies a non-canvas object as invalid input', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const server = createServer((_req, res) => {
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({
+      id: 'page-1',
+      workspace_id: 'workspace-1',
+      type: 'page',
+      title: 'Not a canvas',
+      icon: null,
+      parent_id: null,
+      is_deleted: false,
+      is_template: false,
+      created_at: '2026-07-01T10:00:00Z',
+      updated_at: '2026-07-01T12:00:00Z',
+    }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const result = await executeToolCall('read_canvas', { id: 'page-1' }, 'workspace-1')
+
+    assert.deepEqual(result, {
+      type: 'error',
+      code: 'invalid_input',
+      message: 'page-1 is not a canvas',
+      retryable: false,
+    })
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
 })
 
 test('read_canvas reads canvas content and can omit card text', async () => {
@@ -173,28 +493,176 @@ test('read_canvas reads canvas content and can omit card text', async () => {
 test('list_week_plan validates anchor_date before reading workspace tasks', async () => {
   const result = await executeToolCall('list_week_plan', { anchor_date: '2026/07/07' }, 'workspace-1')
 
-  assert.deepEqual(result, { type: 'error', message: 'anchor_date must be a valid date formatted YYYY-MM-DD' })
+  assert.deepEqual(result, {
+    type: 'error',
+    code: 'invalid_input',
+    message: 'anchor_date must be a valid date formatted YYYY-MM-DD',
+    retryable: false,
+  })
 })
 
 test('list_week_plan rejects impossible calendar dates before reading workspace tasks', async () => {
   const result = await executeToolCall('list_week_plan', { anchor_date: '2026-02-31' }, 'workspace-1')
 
-  assert.deepEqual(result, { type: 'error', message: 'anchor_date must be a valid date formatted YYYY-MM-DD' })
+  assert.deepEqual(result, {
+    type: 'error',
+    code: 'invalid_input',
+    message: 'anchor_date must be a valid date formatted YYYY-MM-DD',
+    retryable: false,
+  })
 })
 
 test('schedule_task_block validates mode, date, and start_time before writing', async () => {
   assert.deepEqual(
     await executeToolCall('schedule_task_block', { mode: 'later', date: '2026-07-07' }, 'workspace-1'),
-    { type: 'error', message: 'mode must be schedule_existing_task or create_time_block' },
+    { type: 'error', code: 'invalid_input', message: 'mode must be schedule_existing_task or create_time_block', retryable: false },
   )
   assert.deepEqual(
     await executeToolCall('schedule_task_block', { mode: 'create_time_block', title: 'Focus', date: '2026-02-31' }, 'workspace-1'),
-    { type: 'error', message: 'date must be a valid date formatted YYYY-MM-DD' },
+    { type: 'error', code: 'invalid_input', message: 'date must be a valid date formatted YYYY-MM-DD', retryable: false },
   )
   assert.deepEqual(
     await executeToolCall('schedule_task_block', { mode: 'create_time_block', title: 'Focus', date: '2026-07-07', start_time: '24:99' }, 'workspace-1'),
-    { type: 'error', message: 'start_time must be a valid time formatted HH:mm' },
+    { type: 'error', code: 'invalid_input', message: 'start_time must be a valid time formatted HH:mm', retryable: false },
   )
+})
+
+test('dispatcher maps task-list server failures without exposing upstream response text', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const server = createServer((_req, res) => {
+    res.statusCode = 503
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ code: 'server_error', message: 'private database detail' }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const result = await executeToolCall('list_task_lists', {}, 'workspace-1')
+
+    assert.deepEqual(result, {
+      type: 'error',
+      code: 'server_error',
+      message: 'AuroraCloud is temporarily unavailable.',
+      retryable: true,
+    })
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
+test('dispatcher does not expose malformed content JSON excerpts', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const privateFixture = 'private-content-fragment'
+  const server = createServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+    res.setHeader('content-type', 'application/json')
+
+    if (url.pathname === '/api/collections/objects/records/object-1') {
+      res.end(JSON.stringify({
+        id: 'object-1',
+        workspace_id: 'workspace-1',
+        type: 'page',
+        title: 'Malformed content',
+        icon: null,
+        parent_id: null,
+        is_deleted: false,
+        is_template: false,
+        created_at: '2026-07-01T10:00:00Z',
+        updated_at: '2026-07-01T12:00:00Z',
+      }))
+      return
+    }
+
+    if (url.pathname === '/api/collections/content/records') {
+      res.end(JSON.stringify({
+        items: [{ id: 'content-1', object_id: 'object-1', content_json: `{${privateFixture}` }],
+        page: 1,
+        perPage: 1,
+        totalPages: 1,
+        totalItems: 1,
+      }))
+      return
+    }
+
+    res.statusCode = 500
+    res.end(JSON.stringify({ code: 'server_error' }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const result = await executeToolCall('get_object', { id: 'object-1' }, 'workspace-1')
+
+    assert.deepEqual(result, {
+      type: 'error',
+      code: 'server_error',
+      message: 'AuroraCloud is temporarily unavailable.',
+      retryable: false,
+    })
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(privateFixture))
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
+})
+
+test('write tools classify missing objects as not found', async () => {
+  const previousApiUrl = process.env['AURORA_API_URL']
+  const server = createServer((_req, res) => {
+    res.statusCode = 404
+    res.setHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ code: 'not_found', message: 'private upstream detail' }))
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert.equal(typeof address, 'object')
+  assert.ok(address)
+
+  try {
+    process.env['AURORA_API_URL'] = `http://127.0.0.1:${(address as AddressInfo).port}`
+    resetAuroraClientForTests()
+
+    const calls: Array<[string, Record<string, unknown>]> = [
+      ['update_object_title', { id: 'missing-1', title: 'New title' }],
+      ['set_content', { id: 'missing-1', text: 'New content' }],
+      ['append_block', { id: 'missing-1', text: 'Appended content' }],
+      ['delete_object', { id: 'missing-1' }],
+      ['set_property', { object_id: 'missing-1', key: 'status', value: 'Todo' }],
+    ]
+
+    for (const [name, input] of calls) {
+      assert.deepEqual(await executeToolCall(name, input, 'workspace-1'), {
+        type: 'error',
+        code: 'not_found',
+        message: 'Object missing-1 not found in this workspace',
+        retryable: false,
+      })
+    }
+  } finally {
+    if (previousApiUrl === undefined) delete process.env['AURORA_API_URL']
+    else process.env['AURORA_API_URL'] = previousApiUrl
+    resetAuroraClientForTests()
+    await new Promise<void>((resolve, reject) => server.close((err) => err ? reject(err) : resolve()))
+  }
 })
 
 test('schedule_task_block preserves existing task time when scheduling an existing task', async () => {

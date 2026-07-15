@@ -12,6 +12,8 @@ const validManifest = {
     'README.md',
     'LICENSE',
     'NOTICE',
+    'docs/setup.md',
+    'docs/agent-profiles.md',
     'dist/index.js',
     'dist/version.js',
   ],
@@ -25,6 +27,8 @@ for (const [label, mutate] of [
   ['wrong name', (manifest) => { manifest.name = 'auroradocs-mcp' }],
   ['wrong version', (manifest) => { manifest.version = '0.1.0' }],
   ['wrong executable', (manifest) => { manifest.bin = { 'aurora-mcp': './src/index.ts' } }],
+  ['missing setup guide', (manifest) => { manifest.paths = manifest.paths.filter((path) => path !== 'docs/setup.md') }],
+  ['missing agent profiles', (manifest) => { manifest.paths = manifest.paths.filter((path) => path !== 'docs/agent-profiles.md') }],
   ['missing required runtime path', (manifest) => { manifest.paths = manifest.paths.filter((path) => path !== 'dist/version.js') }],
   ['forbidden source path', (manifest) => { manifest.paths.push('src/index.ts') }],
 ]) {

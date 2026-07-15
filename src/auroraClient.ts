@@ -1,10 +1,13 @@
 /**
  * auroraClient.ts — AuroraCloud client helpers for the MCP server.
  *
- * SECURITY: Every query is scoped to the configured workspace.
- * On authenticate(), the server verifies the caller is a member of
- * that workspace — if not, the process exits.
+ * SECURITY: Client credentials discover only independently granted workspaces.
+ * Legacy credentials verify membership in their configured default workspace.
+ * Tool execution resolves a granted or verified workspace before data access.
  */
+import type { AuroraConnectionContext, ContentReadResult, GrantedWorkspace } from './contracts.js'
+import { AuroraApiError, ToolInputError, ToolNotFoundError } from './errors.js'
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type AuroraObjectRecord = {
@@ -124,13 +127,22 @@ type BackendAuthStore = {
   save(token: string, record: AuthRecord): void
 }
 
+export type CollectionPage<T> = {
+  items: T[]
+  page: number
+  perPage: number
+  totalPages: number
+  totalItems: number
+}
+
 type BackendCollection = {
-  list(options?: {
+  listPage(options: {
     filter?: string
     sort?: string
     expand?: string
-    batch?: number
-  }): Promise<Array<Record<string, unknown>>>
+    page: number
+    perPage: number
+  }): Promise<CollectionPage<Record<string, unknown>>>
   get(id: string): Promise<Record<string, unknown>>
   create(data: Record<string, unknown>): Promise<Record<string, unknown>>
   update(id: string, data: Record<string, unknown>): Promise<Record<string, unknown>>
@@ -162,13 +174,32 @@ export function getAuroraClient(): BackendClient {
  * Authenticate and verify workspace membership.
  * Exits the process if the user is not a member of the target workspace.
  */
-export async function authenticate(): Promise<void> {
-  const client = getAuroraClient()
-  const workspaceId = process.env['AURORA_WORKSPACE_ID']
+export type AuthenticateOptions = {
+  token?: string
+  workspaceId?: string
+}
 
-  const token = process.env['AURORA_API_TOKEN']
+export async function listGrantedWorkspaces(): Promise<GrantedWorkspace[]> {
+  const response = await getAuroraClient().request<{ items?: unknown }>('/api/mcp/workspaces', { method: 'GET' })
+  if (!Array.isArray(response.items)) throw new Error('Invalid granted workspace response')
+  return response.items.map((item) => mapGrantedWorkspace(item))
+}
+
+export function authenticate(): Promise<void>
+export function authenticate(options: AuthenticateOptions): Promise<AuroraConnectionContext>
+export async function authenticate(options: AuthenticateOptions = {}): Promise<AuroraConnectionContext | void> {
+  const client = getAuroraClient()
+  const workspaceId = options.workspaceId ?? process.env['AURORA_WORKSPACE_ID']
+
+  const token = options.token ?? process.env['AURORA_API_TOKEN']
   if (token) {
     client.authStore.save(token, null)
+    if (token.startsWith('aur_mcp_client_')) {
+      const workspaces = await listGrantedWorkspaces()
+      process.stderr.write('AuroraDocs MCP authenticated.\n')
+      return { kind: 'client', workspaces }
+    }
+    if (!workspaceId) throw new Error('AURORA_WORKSPACE_ID environment variable is required for legacy credentials')
   } else {
     const email = process.env['AURORA_API_EMAIL']
     const password = process.env['AURORA_API_PASSWORD']
@@ -180,21 +211,49 @@ export async function authenticate(): Promise<void> {
         'Provide AURORA_API_TOKEN (recommended: workspace MCP token `aur_mcp_...`), or AURORA_API_EMAIL + AURORA_API_PASSWORD for local development only.',
       )
     }
+    if (!workspaceId) throw new Error('AURORA_WORKSPACE_ID environment variable is required for email/password credentials')
   }
 
   await ensureAuthRecord()
 
   // Verify workspace membership
-  if (workspaceId) {
-    const userId = getAuthUserId()
-    if (!userId) throw new Error('Could not determine authenticated user ID')
-    const members = await client.collection('workspace_members').list({
-      filter: client.filter('workspace_id = {:wid} && user_id = {:uid}', { wid: workspaceId, uid: userId }),
-    })
-    if (!members.length) {
-      throw new Error(`Authenticated user ${userId} is not a member of workspace ${workspaceId}`)
+  const userId = getAuthUserId()
+  if (!userId) throw new Error('Could not determine authenticated user ID')
+  const members = await client.collection('workspace_members').listPage({
+    filter: client.filter('workspace_id = {:wid} && user_id = {:uid}', { wid: workspaceId, uid: userId }),
+    page: 1,
+    perPage: 1,
+  })
+  if (!members.items.length) {
+    throw new Error('Authenticated user is not a member of the configured workspace')
+  }
+  process.stderr.write('AuroraDocs MCP authenticated.\n')
+  return { kind: 'legacy_workspace', defaultWorkspaceId: workspaceId, workspaces: [] }
+}
+
+function mapGrantedWorkspace(value: unknown): GrantedWorkspace {
+  if (!value || typeof value !== 'object') throw new Error('Invalid granted workspace')
+  const item = value as Record<string, unknown>
+  const fields = ['workspaceId', 'alias', 'name', 'role', 'grantId'] as const
+  for (const field of fields) {
+    if (typeof item[field] !== 'string' || !(item[field] as string).trim()) {
+      throw new Error('Invalid granted workspace')
     }
-    process.stderr.write(`Authenticated as ${userId} (role: ${members[0]['role']})\n`)
+  }
+  if (!Array.isArray(item['scopes']) || !item['scopes'].every((scope) => typeof scope === 'string')) {
+    throw new Error('Invalid granted workspace')
+  }
+  if (item['expiresAt'] !== null && (typeof item['expiresAt'] !== 'string' || !item['expiresAt'].trim())) {
+    throw new Error('Invalid granted workspace')
+  }
+  return {
+    workspaceId: item['workspaceId'] as string,
+    alias: item['alias'] as string,
+    name: item['name'] as string,
+    role: item['role'] as string,
+    scopes: [...item['scopes']] as string[],
+    grantId: item['grantId'] as string,
+    expiresAt: item['expiresAt'] as string | null,
   }
 }
 
@@ -208,12 +267,33 @@ function getAuthUserId(): string | null {
 // ── Object CRUD ──────────────────────────────────────────────────────────────
 
 export async function listObjects(workspaceId: string, type?: string): Promise<AuroraObjectRecord[]> {
+  return (await listObjectsPage(workspaceId, type, 1, 50)).items
+}
+
+export async function listObjectsPage(
+  workspaceId: string,
+  type: string | undefined,
+  page: number,
+  perPage: number,
+): Promise<CollectionPage<AuroraObjectRecord>> {
+  if (!Number.isInteger(page) || page < 1) throw new ToolInputError('page must be a positive integer')
+  if (!Number.isInteger(perPage) || perPage < 1 || perPage > 50) {
+    throw new ToolInputError('perPage must be an integer between 1 and 50')
+  }
   const client = getAuroraClient()
   const filter = type
     ? client.filter('workspace_id = {:wid} && is_deleted = false && type = {:type}', { wid: workspaceId, type })
     : client.filter('workspace_id = {:wid} && is_deleted = false', { wid: workspaceId })
-  const records = await client.collection('objects').list({ filter, sort: '-updated_at' })
-  return records.map(mapObject)
+  const result = await client.collection('objects').listPage({ filter, sort: '-updated_at', page, perPage })
+  return { ...result, items: result.items.map(mapObject) }
+}
+
+export async function searchObjectsPage(
+  workspaceId: string,
+  query: string,
+  limit: number,
+): Promise<WorkspaceKnowledgeSource[]> {
+  return searchWorkspaceKnowledgeServer(workspaceId, query, limit)
 }
 
 export async function getObject(id: string, workspaceId: string): Promise<AuroraObjectRecord | null> {
@@ -224,8 +304,9 @@ export async function getObject(id: string, workspaceId: string): Promise<Aurora
     // SECURITY: reject objects outside the configured workspace
     if (obj.workspace_id !== workspaceId) return null
     return obj
-  } catch {
-    return null
+  } catch (error) {
+    if (error instanceof AuroraApiError && error.status === 404) return null
+    throw error
   }
 }
 
@@ -244,37 +325,51 @@ export async function createObject(workspaceId: string, type: string, title: str
 export async function updateObjectTitle(id: string, title: string, workspaceId: string): Promise<void> {
   // Verify ownership before update
   const obj = await getObject(id, workspaceId)
-  if (!obj) throw new Error(`Object ${id} not found in this workspace`)
+  if (!obj) throw new ToolNotFoundError(`Object ${id} not found in this workspace`)
   const client = getAuroraClient()
   await client.collection('objects').update(id, { title })
 }
 
 export async function deleteObject(id: string, workspaceId: string): Promise<void> {
   const obj = await getObject(id, workspaceId)
-  if (!obj) throw new Error(`Object ${id} not found in this workspace`)
+  if (!obj) throw new ToolNotFoundError(`Object ${id} not found in this workspace`)
   const client = getAuroraClient()
   await client.collection('objects').update(id, { is_deleted: true })
 }
 
 // ── Content ──────────────────────────────────────────────────────────────────
 
-export async function getContent(objectId: string, workspaceId: string): Promise<string | null> {
-  // Verify object belongs to workspace
-  const obj = await getObject(objectId, workspaceId)
-  if (!obj) return null
-
-  const client = getAuroraClient()
+export async function getContent(objectId: string, workspaceId: string): Promise<ContentReadResult> {
   try {
-    const records = await client.collection('content').list({
+    // Verify object belongs to workspace
+    const obj = await getObject(objectId, workspaceId)
+    if (!obj) return { availability: 'not_found', text: null }
+
+    const client = getAuroraClient()
+    const records = await client.collection('content').listPage({
       filter: client.filter('object_id = {:id}', { id: objectId }),
+      page: 1,
+      perPage: 1,
     })
-    const r = records[0]
-    if (!r) return null
+    const r = records.items[0]
+    if (!r) return { availability: 'empty', text: null }
     const json = r['content_json']
-    if (!json) return null
-    return extractTextFromDoc(typeof json === 'string' ? JSON.parse(json) : json)
-  } catch {
-    return null
+    if (!json) return { availability: 'empty', text: null }
+    if (typeof json === 'string' && (json.startsWith('v1:') || json.startsWith('v2:'))) {
+      return { availability: 'encrypted_locked', text: null }
+    }
+    const text = extractTextFromDoc(typeof json === 'string' ? JSON.parse(json) : json)
+    return text.trim()
+      ? { availability: 'available', text }
+      : { availability: 'empty', text: null }
+  } catch (error) {
+    if (error instanceof AuroraApiError && error.status === 403) {
+      return { availability: 'permission_denied', text: null }
+    }
+    if (error instanceof AuroraApiError && error.status === 404) {
+      return { availability: 'not_found', text: null }
+    }
+    throw error
   }
 }
 
@@ -283,16 +378,18 @@ export async function getContentJson(objectId: string, workspaceId: string): Pro
   if (!obj) return null
 
   const client = getAuroraClient()
-  const records = await client.collection('content').list({
+  const records = await client.collection('content').listPage({
     filter: client.filter('object_id = {:id}', { id: objectId }),
+    page: 1,
+    perPage: 1,
   })
-  const r = records[0]
+  const r = records.items[0]
   if (!r) return null
   const json = r['content_json']
   if (!json) return null
   if (typeof json === 'string') {
     if (json.startsWith('v1:') || json.startsWith('v2:')) {
-      throw new Error('Object content is end-to-end encrypted and cannot be modified by the MCP server')
+      throw new ToolInputError('Object content is end-to-end encrypted and cannot be modified by the MCP server')
     }
     return JSON.parse(json) as Record<string, unknown>
   }
@@ -369,14 +466,16 @@ export async function setContent(
   contentJson: Record<string, unknown>,
 ): Promise<void> {
   const obj = await getObject(objectId, workspaceId)
-  if (!obj) throw new Error(`Object ${objectId} not found in this workspace`)
+  if (!obj) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
 
   const client = getAuroraClient()
-  const existing = await client.collection('content').list({
+  const existing = await client.collection('content').listPage({
     filter: client.filter('object_id = {:id}', { id: objectId }),
+    page: 1,
+    perPage: 1,
   })
-  if (existing.length > 0) {
-    await client.collection('content').update(String(existing[0].id), { content_json: contentJson })
+  if (existing.items.length > 0) {
+    await client.collection('content').update(String(existing.items[0].id), { content_json: contentJson })
   } else {
     await client.collection('content').create({ object_id: objectId, content_json: contentJson })
   }
@@ -412,8 +511,8 @@ export async function listProperties(objectIds: string[], workspaceId: string): 
     batch.forEach((id, idx) => { params[`id${idx}`] = id })
     const filter = client.filter(conditions.join(' || '), params)
 
-    const records = await client.collection('object_properties').list({ filter })
-    for (const r of records) {
+    const records = await client.collection('object_properties').listPage({ filter, page: 1, perPage: 50 })
+    for (const r of records.items) {
       results.push({
         id: r['id'] as string,
         object_id: r['object_id'] as string,
@@ -439,11 +538,13 @@ export async function upsertProperty(
 ): Promise<void> {
   // Verify object belongs to workspace
   const obj = await getObject(objectId, workspaceId)
-  if (!obj) throw new Error(`Object ${objectId} not found in this workspace`)
+  if (!obj) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
 
   const client = getAuroraClient()
-  const existing = await client.collection('object_properties').list({
+  const existing = await client.collection('object_properties').listPage({
     filter: client.filter('object_id = {:oid} && key = {:key}', { oid: objectId, key }),
+    page: 1,
+    perPage: 1,
   })
   const valueField =
     valueType === 'number' ? 'value_num' :
@@ -455,8 +556,8 @@ export async function upsertProperty(
     valueType === 'boolean' ? (value === 'true') :
     value
 
-  if (existing.length > 0) {
-    await client.collection('object_properties').update(String(existing[0].id), { value_type: valueType, [valueField]: parsedValue })
+  if (existing.items.length > 0) {
+    await client.collection('object_properties').update(String(existing.items[0].id), { value_type: valueType, [valueField]: parsedValue })
   } else {
     await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: parsedValue })
   }
@@ -494,19 +595,17 @@ export async function listMembers(workspaceId: string): Promise<AuroraWorkspaceM
 
 export async function listTaskLists(workspaceId: string): Promise<AuroraTaskList[]> {
   const client = getAuroraClient()
-  try {
-    const records = await client.collection('task_lists').list({
-      filter: client.filter('workspace_id = {:wid}', { wid: workspaceId }),
-      sort: 'position',
-    })
-    return records.map((r) => ({
-      id: r['id'] as string,
-      name: r['name'] as string,
-      default_status: (r['default_status'] as string | null) ?? null,
-    }))
-  } catch {
-    return []
-  }
+  const records = await client.collection('task_lists').listPage({
+    filter: client.filter('workspace_id = {:wid}', { wid: workspaceId }),
+    sort: 'position',
+    page: 1,
+    perPage: 50,
+  })
+  return records.items.map((r) => ({
+    id: r['id'] as string,
+    name: r['name'] as string,
+    default_status: (r['default_status'] as string | null) ?? null,
+  }))
 }
 
 export async function listTaskStatuses(_workspaceId: string): Promise<string[]> {
@@ -570,14 +669,16 @@ export async function updateTaskProps(
   patch: Partial<AuroraTaskProps>,
 ): Promise<void> {
   const obj = await getObject(objectId, workspaceId)
-  if (!obj) throw new Error(`Object ${objectId} not found in this workspace`)
-  if (obj.type !== 'task') throw new Error(`${objectId} is not a task`)
+  if (!obj) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
+  if (obj.type !== 'task') throw new ToolInputError(`${objectId} is not a task`)
 
   const client = getAuroraClient()
   const upsert = async (key: string, valueType: string, value: string | number | boolean | null) => {
     if (value === null || value === '') return
-    const existing = await client.collection('object_properties').list({
+    const existing = await client.collection('object_properties').listPage({
       filter: client.filter('object_id = {:oid} && key = {:key}', { oid: objectId, key }),
+      page: 1,
+      perPage: 1,
     })
     const valueField =
       valueType === 'number' ? 'value_num' :
@@ -585,8 +686,8 @@ export async function updateTaskProps(
       valueType === 'boolean' ? 'value_bool' :
       valueType === 'ref' ? 'value_ref' :
       'value_text'
-    if (existing.length > 0) {
-      await client.collection('object_properties').update(String(existing[0].id), { value_type: valueType, [valueField]: value })
+    if (existing.items.length > 0) {
+      await client.collection('object_properties').update(String(existing.items[0].id), { value_type: valueType, [valueField]: value })
     } else {
       await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: value })
     }
@@ -630,7 +731,7 @@ export async function readCanvasContent(
 ): Promise<{ object: AuroraObjectRecord; contentJson: Record<string, unknown> | null } | null> {
   const object = await getObject(objectId, workspaceId)
   if (!object) return null
-  if (object.type !== 'canvas') throw new Error(`${objectId} is not a canvas`)
+  if (object.type !== 'canvas') throw new ToolInputError(`${objectId} is not a canvas`)
   const contentJson = await getContentJson(objectId, workspaceId)
   return { object, contentJson }
 }
@@ -840,41 +941,43 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
     const headers = new Headers()
     if (authStore.token) headers.set('authorization', `Bearer ${authStore.token}`)
     if (options.body !== undefined) headers.set('content-type', 'application/json')
-    const response = await fetch(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
-      method: options.method ?? 'GET',
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    })
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
+        method: options.method ?? 'GET',
+        headers,
+        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      })
+    } catch (error) {
+      throw new AuroraApiError(
+        0,
+        'network_error',
+        error instanceof Error ? error.message : 'Network request failed',
+      )
+    }
     if (!response.ok) {
       let message = `${response.status} ${response.statusText}`
+      let code: string | null = null
       try {
-        const json = await response.json() as { error?: string; message?: string }
-        message = json.error ?? json.message ?? message
+        const json = await response.json() as { code?: unknown; error?: unknown; message?: unknown }
+        if (typeof json.code === 'string') code = json.code
+        if (typeof json.error === 'string') message = json.error
+        else if (typeof json.message === 'string') message = json.message
       } catch {
         // ignore parse failure
       }
-      throw new Error(message)
+      throw new AuroraApiError(response.status, code, message, readRetryAfterSeconds(response.headers.get('retry-after')))
     }
     if (response.status === 204) return undefined as T
     return await response.json() as T
   }
 
   const collection = (name: string): BackendCollection => ({
-    async list(options: { filter?: string; sort?: string; expand?: string; batch?: number } = {}) {
-      const pageSize = options.batch ?? 500
-      const first = await request<{ items: Array<Record<string, unknown>>; totalPages: number }>(
-        `/api/collections/${name}/records?${toQueryString(1, pageSize, options)}`,
+    async listPage(options: { filter?: string; sort?: string; expand?: string; page: number; perPage: number }) {
+      return request<CollectionPage<Record<string, unknown>>>(
+        `/api/collections/${name}/records?${toQueryString(options.page, options.perPage, options)}`,
         { method: 'GET' },
       )
-      const items = [...first.items]
-      for (let page = 2; page <= (first.totalPages ?? 1); page += 1) {
-        const next = await request<{ items: Array<Record<string, unknown>> }>(
-          `/api/collections/${name}/records?${toQueryString(page, pageSize, options)}`,
-          { method: 'GET' },
-        )
-        items.push(...next.items)
-      }
-      return items
     },
     async get(id: string) {
       return request<Record<string, unknown>>(`/api/collections/${name}/records/${encodeURIComponent(id)}`, { method: 'GET' })
@@ -914,6 +1017,15 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
   })
 
   return { authStore, filter, collection, request }
+}
+
+function readRetryAfterSeconds(value: string | null): number | null {
+  if (!value) return null
+  const seconds = Number(value)
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds)
+  const retryAt = Date.parse(value)
+  if (Number.isNaN(retryAt)) return null
+  return Math.max(0, Math.ceil((retryAt - Date.now()) / 1000))
 }
 
 function toQueryString(

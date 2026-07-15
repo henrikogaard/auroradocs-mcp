@@ -22,6 +22,7 @@
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
+    "docs/**/*.md",
     "README.md",
     "LICENSE",
     "NOTICE"

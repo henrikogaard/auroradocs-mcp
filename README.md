@@ -1,14 +1,15 @@
 # AuroraDocs MCP Server
 
-`@henrikogard/auroradocs-mcp` connects a local MCP client to one AuroraCloud
-workspace. It runs on your computer over stdio and sends authenticated requests
-to `https://api.auroradocs.eu`.
+`@henrikogard/auroradocs-mcp` connects a local MCP client to independently
+granted AuroraCloud workspaces. It runs on your computer over stdio and sends
+authenticated requests to `https://api.auroradocs.eu`.
 
 The public package is `@henrikogard/auroradocs-mcp`, the executable is
 `aurora-mcp`, and this documentation targets version `0.1.1`.
 
 For an end-to-end installation walkthrough, use the dedicated
-[Setup guide](docs/setup.md).
+[Setup guide](docs/setup.md). Hermes and OpenClaw users should also apply the
+bounded [read-only agent profiles](docs/agent-profiles.md).
 
 ## Requirements
 
@@ -21,7 +22,14 @@ For an end-to-end installation walkthrough, use the dedicated
 Browser-only workspaces and Local folders workspaces are not supported. The
 server does not read a browser tab or a folder on your computer.
 
-## Create an MCP key
+## Create an MCP credential
+
+New multi-workspace installations should use an `aur_mcp_client_` credential
+with owner-approved, independently revocable workspace grants. Follow the
+[Setup guide](docs/setup.md) for that flow. The workspace-scoped `aur_mcp_`
+steps below remain available during the legacy migration window.
+
+### Legacy workspace token
 
 1. Sign in to AuroraDocs and open the AuroraCloud workspace you want to use.
 2. Go to **Settings → Workspace → MCP Access**.
@@ -52,8 +60,8 @@ write scope does not imply its read counterpart.
 | Confirm the connection and list titles | `read:objects` |
 | Read page or Canvas content | `read:objects`, `read:content` |
 | Search and read workspace knowledge | `read:objects`, `read:content`, `search` |
-| Review or update tasks and week planning | `read:objects`, `tasks` |
-| Update task metadata after confirmation | `read:objects`, `tasks`, `write:objects` |
+| Review tasks and week planning | `read:objects`, `read:tasks` |
+| Update task metadata after confirmation | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
 | Create or rename non-task objects | `read:objects`, `write:objects` |
 | Replace or append document content | `read:objects`, `read:content`, `write:content` |
 
@@ -62,8 +70,9 @@ membership at startup and most tools operate on object metadata. Add
 `write:objects` or `write:content` only when you intend to let the client modify
 the workspace. See the complete [scope and tool reference](docs/tools.md).
 
-The `tasks` scope permits both reading and writing task metadata. Do not grant
-it to a client that should have strictly read-only access.
+New client grants use separate `read:tasks` and `write:tasks` scopes. The legacy
+`tasks` scope permits both reading and writing task metadata; it is
+compatibility-only and cannot be selected for new grants.
 
 `search_objects` and its `search` alias search object titles with `read:objects` only.
 `wiki_search` searches workspace knowledge and requires `read:objects` plus `search`.
@@ -72,18 +81,22 @@ in the knowledge-search recipe above.
 
 ## Configure a client
 
-All examples below use the production AuroraCloud API and pin package version
-`0.1.1`. Replace `WORKSPACE_ID` and `REDACTED` locally. Do not commit the
+All examples below use the production AuroraCloud API, a new client credential,
+and package version `0.1.1`. Replace `REDACTED` locally. Do not commit the
 resulting configuration. The examples store the token in the client's saved
 configuration, so protect that file as a credential.
 
-The server requires exactly these environment variables:
+New client credentials require these environment variables:
 
 | Variable | Value |
 | --- | --- |
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
-| `AURORA_WORKSPACE_ID` | the workspace ID shown on the MCP Access page |
-| `AURORA_API_TOKEN` | the one-time `aur_mcp_` token |
+| `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
+
+Do not set `AURORA_WORKSPACE_ID` for a client credential. The server discovers
+only its owner-approved grants with `list_workspaces`; each data call then
+selects a workspace explicitly. A legacy `aur_mcp_` token still requires
+`AURORA_WORKSPACE_ID` during the migration window.
 
 Do not configure an AuroraDocs email or password. Public onboarding supports
 MCP-token authentication only.
@@ -101,7 +114,6 @@ this server under `mcpServers`, preserving any servers already present:
       "args": ["-y", "@henrikogard/auroradocs-mcp@0.1.1"],
       "env": {
         "AURORA_API_URL": "https://api.auroradocs.eu",
-        "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
         "AURORA_API_TOKEN": "REDACTED"
       }
     }
@@ -121,7 +133,6 @@ Options must appear before the server name:
 ```bash
 claude mcp add --transport stdio --scope user \
   --env AURORA_API_URL=https://api.auroradocs.eu \
-  --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
   auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.1.1
 ```
@@ -137,7 +148,6 @@ The installed Codex CLI accepts `--env` for local stdio servers:
 ```bash
 codex mcp add \
   --env AURORA_API_URL=https://api.auroradocs.eu \
-  --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
   auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.1.1
 ```
@@ -154,7 +164,6 @@ Use this valid generic JSON shape when a client accepts an MCP server object:
   "args": ["-y", "@henrikogard/auroradocs-mcp@0.1.1"],
   "env": {
     "AURORA_API_URL": "https://api.auroradocs.eu",
-    "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
     "AURORA_API_TOKEN": "REDACTED"
   }
 }
@@ -166,13 +175,13 @@ local server calls, not a hosted MCP endpoint.
 
 ## Verify read-only access first
 
-1. Mint a token with only `read:objects`.
+1. Grant the client one workspace with only `read:objects`.
 2. Start or restart the client.
-3. Ask the client to call `list_objects` with a small limit and return only
-   object titles and IDs.
-4. Confirm that the result belongs to the intended workspace.
-5. Only then mint a replacement token with any additional scopes your workflow
-   genuinely needs. Update the client, verify it, and revoke the first token.
+3. Ask the client to call `list_workspaces` and confirm only the expected grant
+   is visible.
+4. Call `get_project_context` for one explicit workspace and project ID.
+5. Only then extend that workspace grant with any optional read scopes the
+   workflow genuinely needs.
 
 If the connection fails, see [Troubleshooting](docs/troubleshooting.md). Never
 paste the raw token into logs or bug reports.
@@ -212,6 +221,7 @@ report a vulnerability, follow [SECURITY.md](SECURITY.md).
 ## Reference
 
 - [Tools and scopes](docs/tools.md)
+- [Hermes and OpenClaw agent profiles](docs/agent-profiles.md)
 - [Agent planning and knowledge roadmap](docs/agent-planning-knowledge-roadmap.md)
 - [Security boundaries](docs/security.md)
 - [Troubleshooting](docs/troubleshooting.md)
@@ -227,13 +237,19 @@ pnpm check
 ```
 
 The live AuroraCloud smoke test is intentionally separate because it requires a
-real workspace and a least-privilege `aur_mcp_` token. Give the smoke token only
-`read:objects`, `read:content`, and `search`; explicitly omit `tasks` because
-that scope authorizes both task reads and task writes. The smoke authenticates,
-checks membership, lists tools, members, and objects, and reads the recent
-knowledge catalog. Every dispatched tool must carry the catalog's authoritative
-read-only classification, and the smoke never creates, updates, or deletes
-workspace data. See [CONTRIBUTING.md](CONTRIBUTING.md) before using it.
+real owner-approved workspace grant. Prefer `AURORA_API_TOKEN=aur_mcp_client_...`
+with `AURORA_API_URL`; a legacy `aur_mcp_...` token additionally requires
+`AURORA_WORKSPACE_ID`. Grant only `read:objects`; add `read:content` only when
+the selected project's readable brief or citations must be included.
+
+The smoke always calls `list_workspaces`. Set `AURORA_SMOKE_PROJECT_ID` to add
+one bounded `get_project_context` request; omit it to verify discovery without
+guessing a project. When a client credential has multiple grants, also set
+`AURORA_SMOKE_WORKSPACE_ID` for that project check. The dispatcher verifies the
+catalog's authoritative read-only classification and never dispatches a write
+tool. Keep `AURORA_API_TOKEN` out of commands, logs, and committed files by
+providing it through your local secret environment. See
+[CONTRIBUTING.md](CONTRIBUTING.md) before using the smoke.
 
 ## License
 

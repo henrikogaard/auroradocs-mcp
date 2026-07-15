@@ -6,7 +6,7 @@
  * No cross-workspace or cross-user data leakage is possible.
  */
 import {
-  listObjects,
+  listObjectsPage,
   getObject,
   getContent,
   setContent,
@@ -28,18 +28,31 @@ import {
   createPlanningTimeBlock,
   readCanvasContent,
   searchWorkspaceKnowledgeServer,
+  searchObjectsPage,
 } from './auroraClient.js'
 import type { AuroraWorkspaceMember, AuroraTaskList, AuroraTaskProps, WorkspaceKnowledgeSource } from './auroraClient.js'
 import { buildWeekPlan, normalizeCanvasContent } from './planningTools.js'
 import type { McpCanvasReadResult, McpWeekPlan } from './planningTools.js'
 import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js'
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
+import { readBoundedInteger, readWorkspaceSelector } from './input.js'
+import { ToolInputError, toSafeToolError } from './errors.js'
+import { getProjectContext, listProjectChanges } from './projectContext.js'
+import type {
+  AuroraConnectionContext,
+  Availability,
+  GrantedWorkspace,
+  ProjectChangesResult,
+  ProjectContextResult,
+  ToolErrorResult,
+} from './contracts.js'
 
 // ── Result types ─────────────────────────────────────────────────────────────
 
 export type ToolResult =
+  | { type: 'workspaces'; workspaces: GrantedWorkspace[] }
   | { type: 'objects'; objects: { id: string; title: string | null; type: string; icon: string | null }[] }
-  | { type: 'object'; object: { id: string; title: string | null; type: string; icon: string | null }; content: string | null; properties: Record<string, string> }
+  | { type: 'object'; object: { id: string; title: string | null; type: string; icon: string | null }; availability: Availability; content: string | null; properties: Record<string, string> }
   | { type: 'created'; id: string; title: string }
   | { type: 'task_created'; id: string; title: string; status: string | null; task_list_name: string | null }
   | { type: 'task_updated'; id: string; title: string; changed_fields: string[] }
@@ -58,8 +71,16 @@ export type ToolResult =
   | { type: 'members'; members: { id: string; name: string | null; email: string; role: string }[] }
   | { type: 'task_lists'; task_lists: { id: string; name: string }[] }
   | { type: 'task_statuses'; statuses: string[] }
+  | ({ type: 'project_context' } & ProjectContextResult)
+  | ({ type: 'project_changes' } & ProjectChangesResult)
   | { type: 'no_op'; message: string }
-  | { type: 'error'; message: string }
+  | ToolErrorResult
+
+export type McpToolCallResult = {
+  content: [{ type: 'text'; text: string }]
+  structuredContent: ToolResult
+  isError: boolean
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -73,6 +94,14 @@ function readStringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean)
   if (typeof value === 'string') return value.split(',').map((v) => v.trim()).filter(Boolean)
   return []
+}
+
+function invalidInput(message: string): ToolErrorResult {
+  return { type: 'error', code: 'invalid_input', message, retryable: false }
+}
+
+function notFound(message: string): ToolErrorResult {
+  return { type: 'error', code: 'not_found', message, retryable: false }
 }
 
 function todayDateKey(): string {
@@ -161,90 +190,152 @@ function normalizePriority(value: string): string | null {
 
 // ── Tool execution ───────────────────────────────────────────────────────────
 
+function normalizeConnectionContext(context: AuroraConnectionContext | string): AuroraConnectionContext {
+  return typeof context === 'string'
+    ? { kind: 'legacy_workspace', defaultWorkspaceId: context, workspaces: [] }
+    : context
+}
+
+export function resolveWorkspace(
+  context: AuroraConnectionContext,
+  input: Record<string, unknown>,
+): string {
+  const hasSelector = Object.hasOwn(input, 'workspace_id') || Object.hasOwn(input, 'workspace_alias')
+
+  if (context.kind === 'legacy_workspace') {
+    if (!hasSelector) return context.defaultWorkspaceId
+    const parsed = readWorkspaceSelector(input)
+    if (!parsed.ok) throw new ToolInputError(parsed.message)
+    const selector = 'workspaceId' in parsed.value ? parsed.value.workspaceId : parsed.value.workspaceAlias
+    if (selector !== context.defaultWorkspaceId) {
+      throw new ToolInputError('Legacy credentials are restricted to the configured workspace')
+    }
+    return context.defaultWorkspaceId
+  }
+
+  if (!hasSelector) {
+    throw new ToolInputError('workspace_id or workspace_alias is required')
+  }
+  const parsed = readWorkspaceSelector(input)
+  if (!parsed.ok) throw new ToolInputError(parsed.message)
+  const matches = context.workspaces.filter((workspace) => (
+    'workspaceId' in parsed.value
+      ? workspace.workspaceId === parsed.value.workspaceId
+      : workspace.alias === parsed.value.workspaceAlias
+  ))
+  if (matches.length !== 1) {
+    throw new ToolInputError('Workspace selector does not match an available grant')
+  }
+  return matches[0].workspaceId
+}
+
 export async function executeToolCall(
+  name: string,
+  input: Record<string, unknown>,
+  connection: AuroraConnectionContext | string,
+): Promise<ToolResult> {
+  try {
+    const context = normalizeConnectionContext(connection)
+    if (name === 'list_workspaces') return { type: 'workspaces', workspaces: context.workspaces }
+    if (name === 'get_mcp_tool_coverage' || name === 'get_mcp_workflow_recipes') {
+      return await executeToolCallUnsafe(name, input, context.kind === 'legacy_workspace' ? context.defaultWorkspaceId : '')
+    }
+    return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input))
+  } catch (error) {
+    return toSafeToolError(error)
+  }
+}
+
+async function executeToolCallUnsafe(
   name: string,
   input: Record<string, unknown>,
   workspaceId: string,
 ): Promise<ToolResult> {
-  try {
-    switch (name) {
+  switch (name) {
       // ── Read tools ─────────────────────────────────────────────────────
 
       case 'search':
       case 'search_objects': {
-        const query = String(input['query'] ?? '').toLowerCase()
+        const query = String(input['query'] ?? '').trim()
         const typeFilter = input['type'] ? String(input['type']) : undefined
-        const all = await listObjects(workspaceId, typeFilter)
-        const matches = all
-          .filter((o) => (o.title ?? '').toLowerCase().includes(query))
-          .slice(0, 10)
-          .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 10, min: 1, max: 50 })
+        if (!limit.ok) return invalidInput(limit.message)
+        const sources = await searchObjectsPage(workspaceId, query, limit.value)
+        const matches = [...new Map(
+          sources
+            .filter((source) => !typeFilter || source.objectType === typeFilter)
+            .map((source) => [source.objectId, {
+              id: source.objectId,
+              title: source.title,
+              type: source.objectType,
+              icon: source.icon,
+            }]),
+        ).values()].slice(0, limit.value)
         return { type: 'objects', objects: matches }
       }
 
       case 'list_objects': {
         const typeFilter = input['type'] ? String(input['type']) : undefined
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 20
-        const all = await listObjects(workspaceId, typeFilter)
-        const results = all
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
+        if (!limit.ok) return invalidInput(limit.message)
+        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value)
+        const results = page.items
           .filter((o) => !o.is_template)
-          .slice(0, limit)
           .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
         return { type: 'objects', objects: results }
       }
 
       case 'list_recent': {
         const typeFilter = input['type'] ? String(input['type']) : undefined
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 20
-        const all = await listObjects(workspaceId, typeFilter)
-        const results = all
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
+        if (!limit.ok) return invalidInput(limit.message)
+        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value)
+        const results = page.items
           .filter((o) => !o.is_template)
-          .slice(0, limit)
           .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
         return { type: 'objects', objects: results }
       }
 
       case 'wiki_search': {
         const query = readString(input['query'])
-        if (!query) return { type: 'error', message: 'Query is required' }
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 20
-        const sources = await searchWorkspaceKnowledgeServer(workspaceId, query, limit)
+        if (!query) return invalidInput('Query is required')
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
+        if (!limit.ok) return invalidInput(limit.message)
+        const sources = await searchWorkspaceKnowledgeServer(workspaceId, query, limit.value)
         return { type: 'knowledge_sources', sources }
       }
 
       case 'wiki_get_page': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Object ID is required' }
+        if (!id) return invalidInput('Object ID is required')
         const includeFullText = Boolean(input['includeFullText'])
         const source = await getWorkspaceKnowledgeObjectServer(workspaceId, id, includeFullText)
-        if (!source) return { type: 'error', message: `Object ${id} not found in this workspace` }
+        if (!source) return notFound(`Object ${id} not found in this workspace`)
         return { type: 'knowledge_sources', sources: [source] }
       }
 
       case 'wiki_related': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Object ID is required' }
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 6
-        const sources = await listWorkspaceRelatedKnowledgeServer(workspaceId, id, limit)
+        if (!id) return invalidInput('Object ID is required')
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 6, min: 1, max: 10 })
+        if (!limit.ok) return invalidInput(limit.message)
+        const sources = await listWorkspaceRelatedKnowledgeServer(workspaceId, id, limit.value)
         return { type: 'knowledge_sources', sources }
       }
 
       case 'wiki_recent': {
-        const limit = typeof input['limit'] === 'number' ? input['limit'] : 6
-        const sources = await listWorkspaceRecentKnowledgeServer(workspaceId, limit)
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 6, min: 1, max: 10 })
+        if (!limit.ok) return invalidInput(limit.message)
+        const sources = await listWorkspaceRecentKnowledgeServer(workspaceId, limit.value)
         return { type: 'knowledge_sources', sources }
       }
 
       case 'get_object': {
         const id = String(input['id'] ?? '')
         const obj = await getObject(id, workspaceId)
-        if (!obj) return { type: 'error', message: `Object ${id} not found in this workspace` }
+        if (!obj) return notFound(`Object ${id} not found in this workspace`)
 
         const content = await getContent(id, workspaceId)
-        // Detect E2EE content
-        const displayContent = content && (content.startsWith('v1:') || content.startsWith('v2:'))
-          ? '[Content is end-to-end encrypted and cannot be read by the MCP server]'
-          : content
 
         // Include properties
         const rawProps = await listProperties([id], workspaceId)
@@ -262,7 +353,8 @@ export async function executeToolCall(
         return {
           type: 'object',
           object: { id: obj.id, title: obj.title, type: obj.type, icon: obj.icon },
-          content: displayContent ?? null,
+          availability: content.availability,
+          content: content.text,
           properties,
         }
       }
@@ -288,14 +380,47 @@ export async function executeToolCall(
       case 'get_mcp_workflow_recipes':
         return { type: 'mcp_workflow_recipes', recipes: getMcpWorkflowRecipes() }
 
+      case 'get_project_context': {
+        const projectId = readString(input['project_id'])
+        const query = readString(input['query'])
+        if ((projectId === null) === (query === null)) {
+          return invalidInput('Exactly one of project_id or query is required')
+        }
+        const activityDays = readBoundedInteger(input, 'activity_days', { defaultValue: 14, min: 1, max: 90 })
+        if (!activityDays.ok) return invalidInput(activityDays.message)
+        const taskLimit = readBoundedInteger(input, 'task_limit', { defaultValue: 20, min: 1, max: 50 })
+        if (!taskLimit.ok) return invalidInput(taskLimit.message)
+        const sourceLimit = readBoundedInteger(input, 'source_limit', { defaultValue: 10, min: 1, max: 25 })
+        if (!sourceLimit.ok) return invalidInput(sourceLimit.message)
+        const result = await getProjectContext(workspaceId, {
+          ...(projectId ? { projectId } : { query: query as string }),
+          activityDays: activityDays.value,
+          taskLimit: taskLimit.value,
+          sourceLimit: sourceLimit.value,
+        })
+        return { type: 'project_context', ...result }
+      }
+
+      case 'list_project_changes': {
+        const projectId = readString(input['project_id'])
+        if (!projectId) return invalidInput('project_id is required')
+        const cursor = readString(input['cursor'])
+        if (!cursor) return invalidInput('cursor is required')
+        const limit = readBoundedInteger(input, 'limit', { defaultValue: 50, min: 1, max: 100 })
+        if (!limit.ok) return invalidInput(limit.message)
+        const result = await listProjectChanges(workspaceId, { projectId, cursor, limit: limit.value })
+        return { type: 'project_changes', ...result }
+      }
+
       case 'list_week_plan': {
         const anchorDate = readString(input['anchor_date']) ?? todayDateKey()
         if (!isDateKey(anchorDate)) {
-          return { type: 'error', message: 'anchor_date must be a valid date formatted YYYY-MM-DD' }
+          return invalidInput('anchor_date must be a valid date formatted YYYY-MM-DD')
         }
 
         const includeUnscheduled = input['include_unscheduled'] !== false
-        const unscheduledLimit = typeof input['unscheduled_limit'] === 'number' ? input['unscheduled_limit'] : 12
+        const unscheduledLimit = readBoundedInteger(input, 'unscheduled_limit', { defaultValue: 12, min: 1, max: 50 })
+        if (!unscheduledLimit.ok) return invalidInput(unscheduledLimit.message)
         const tasks = await listPlanningTasks(workspaceId)
         return {
           type: 'week_plan',
@@ -309,16 +434,16 @@ export async function executeToolCall(
           })), {
             anchorDate,
             includeUnscheduled,
-            unscheduledLimit,
+            unscheduledLimit: unscheduledLimit.value,
           }),
         }
       }
 
       case 'read_canvas': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Canvas object ID is required' }
+        if (!id) return invalidInput('Canvas object ID is required')
         const result = await readCanvasContent(workspaceId, id)
-        if (!result) return { type: 'error', message: `Canvas ${id} not found in this workspace` }
+        if (!result) return notFound(`Canvas ${id} not found in this workspace`)
         const includeText = input['include_text'] !== false
         return {
           type: 'canvas',
@@ -334,27 +459,27 @@ export async function executeToolCall(
         const mode = readString(input['mode'])
         const date = readString(input['date'])
         if (mode !== 'schedule_existing_task' && mode !== 'create_time_block') {
-          return { type: 'error', message: 'mode must be schedule_existing_task or create_time_block' }
+          return invalidInput('mode must be schedule_existing_task or create_time_block')
         }
         if (!date || !isDateKey(date)) {
-          return { type: 'error', message: 'date must be a valid date formatted YYYY-MM-DD' }
+          return invalidInput('date must be a valid date formatted YYYY-MM-DD')
         }
 
         const startTime = readString(input['start_time'])
         if (startTime && !isTimeKey(startTime)) {
-          return { type: 'error', message: 'start_time must be a valid time formatted HH:mm' }
+          return invalidInput('start_time must be a valid time formatted HH:mm')
         }
 
         if (mode === 'schedule_existing_task') {
           const taskId = readString(input['task_id'])
-          if (!taskId) return { type: 'error', message: 'task_id is required for schedule_existing_task' }
+          if (!taskId) return invalidInput('task_id is required for schedule_existing_task')
 
           const object = await getObject(taskId, workspaceId)
-          if (!object) return { type: 'error', message: `Object ${taskId} not found in this workspace` }
-          if (object.type !== 'task') return { type: 'error', message: `${taskId} is not a task` }
+          if (!object) return notFound(`Object ${taskId} not found in this workspace`)
+          if (object.type !== 'task') return invalidInput(`${taskId} is not a task`)
 
           const props = await getTaskProps(taskId, workspaceId)
-          if (props.status === 'Done') return { type: 'error', message: 'Completed tasks cannot be scheduled' }
+          if (props.status === 'Done') return invalidInput('Completed tasks cannot be scheduled')
 
           const dueDate = startTime ? `${date}T${startTime}` : weekPlanningDueDateForDay(date, props.due_date)
           await updateTaskProps(taskId, workspaceId, { due_date: dueDate })
@@ -362,14 +487,14 @@ export async function executeToolCall(
         }
 
         const title = readString(input['title'])
-        if (!title) return { type: 'error', message: 'title is required for create_time_block' }
+        if (!title) return invalidInput('title is required for create_time_block')
 
         const durationRaw = input['duration_minutes']
         if (
           durationRaw !== undefined
           && (typeof durationRaw !== 'number' || !Number.isFinite(durationRaw) || durationRaw <= 0)
         ) {
-          return { type: 'error', message: 'duration_minutes must be a positive number' }
+          return invalidInput('duration_minutes must be a positive number')
         }
 
         const blockInput = buildWeekPlanningTimeBlockTaskInput({
@@ -391,7 +516,7 @@ export async function executeToolCall(
 
       case 'create_object': {
         const type = String(input['type'] ?? 'page')
-        if (type === 'task') return { type: 'error', message: 'Use create_task for tasks' }
+        if (type === 'task') return invalidInput('Use create_task for tasks')
         const title = String(input['title'] ?? 'Untitled')
         const obj = await createObject(workspaceId, type, title)
         return { type: 'created', id: obj.id, title: obj.title ?? title }
@@ -399,7 +524,7 @@ export async function executeToolCall(
 
       case 'create_task': {
         const title = readString(input['title'])
-        if (!title) return { type: 'error', message: 'Task title is required' }
+        if (!title) return invalidInput('Task title is required')
 
         const obj = await createObject(workspaceId, 'task', title)
 
@@ -418,16 +543,16 @@ export async function executeToolCall(
 
       case 'update_task': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Task ID is required' }
+        if (!id) return invalidInput('Task ID is required')
 
         const obj = await getObject(id, workspaceId)
-        if (!obj) return { type: 'error', message: `Object ${id} not found in this workspace` }
-        if (obj.type !== 'task') return { type: 'error', message: `${id} is not a task` }
+        if (!obj) return notFound(`Object ${id} not found in this workspace`)
+        if (obj.type !== 'task') return invalidInput(`${id} is not a task`)
 
         const changedFields: string[] = []
         if ('title' in input) {
           const newTitle = readString(input['title'])
-          if (!newTitle) return { type: 'error', message: 'Task title cannot be empty' }
+          if (!newTitle) return invalidInput('Task title cannot be empty')
           await updateObjectTitle(id, newTitle, workspaceId)
           changedFields.push('title')
         }
@@ -456,21 +581,21 @@ export async function executeToolCall(
 
       case 'update_object': {
         const id = readString(input['id'])
-        if (!id) return { type: 'error', message: 'Object ID is required' }
+        if (!id) return invalidInput('Object ID is required')
 
         const obj = await getObject(id, workspaceId)
-        if (!obj) return { type: 'error', message: `Object ${id} not found in this workspace` }
+        if (!obj) return notFound(`Object ${id} not found in this workspace`)
 
         const changedFields: string[] = []
         if ('title' in input) {
           const title = readString(input['title'])
-          if (!title) return { type: 'error', message: 'Object title cannot be empty' }
+          if (!title) return invalidInput('Object title cannot be empty')
           await updateObjectTitle(id, title, workspaceId)
           changedFields.push('title')
         }
         if ('text' in input || 'content' in input) {
           const text = readString(input['text'] ?? input['content'])
-          if (!text) return { type: 'error', message: 'Object content cannot be empty' }
+          if (!text) return invalidInput('Object content cannot be empty')
           await setContent(id, workspaceId, textToTipTapDoc(text))
           changedFields.push('content')
         }
@@ -492,8 +617,8 @@ export async function executeToolCall(
       case 'append_block': {
         const id = readString(input['id'])
         const text = readString(input['text'] ?? input['content'])
-        if (!id) return { type: 'error', message: 'Object ID is required' }
-        if (!text) return { type: 'error', message: 'Text is required' }
+        if (!id) return invalidInput('Object ID is required')
+        if (!text) return invalidInput('Text is required')
         await appendContentText(id, workspaceId, text)
         return { type: 'content_appended', id }
       }
@@ -517,10 +642,7 @@ export async function executeToolCall(
         return { type: 'no_op', message: 'Navigation is not supported in the MCP server context.' }
 
       default:
-        return { type: 'error', message: `Unknown tool: ${name}` }
-    }
-  } catch (err) {
-    return { type: 'error', message: err instanceof Error ? err.message : String(err) }
+        return invalidInput(`Unknown tool: ${name}`)
   }
 }
 
@@ -546,7 +668,7 @@ async function resolveTaskInput(
     if (raw === null) patch.priority = null
     else {
       const normalized = normalizePriority(raw)
-      if (!normalized) throw new Error(`Unknown priority: ${raw}`)
+      if (!normalized) throw new ToolInputError(`Unknown priority: ${raw}`)
       patch.priority = normalized
     }
   }
@@ -572,7 +694,7 @@ async function resolveTaskInput(
     } else {
       const lists = await listTaskLists(workspaceId)
       const match = matchTaskList(query, lists)
-      if (!match) throw new Error(`Could not resolve task list: ${query}`)
+      if (!match) throw new ToolInputError(`Could not resolve task list: ${query}`)
       patch.task_list_id = match.id
       // Apply default status if not explicitly set
       if (patch.status === undefined && match.default_status) {
@@ -589,7 +711,7 @@ async function resolveTaskInput(
       const members = await listMembers(workspaceId)
       const resolved = queries.map((q) => {
         const m = matchMember(q, members)
-        if (!m) throw new Error(`Could not resolve assignee: ${q}`)
+        if (!m) throw new ToolInputError(`Could not resolve assignee: ${q}`)
         return m.id
       })
       patch.assignees = [...new Set(resolved)]
@@ -613,6 +735,9 @@ function textToTipTapDoc(text: string): Record<string, unknown> {
 
 export function formatToolResult(result: ToolResult): string {
   switch (result.type) {
+    case 'workspaces':
+      if (!result.workspaces.length) return 'No granted workspaces.'
+      return result.workspaces.map((workspace) => `- ${workspace.name} (${workspace.alias}, ${workspace.workspaceId})`).join('\n')
     case 'objects':
       if (!result.objects.length) return 'No objects found.'
       return result.objects.map((o) => `- [${o.type}] ${o.title ?? '(Untitled)'} (${o.id})`).join('\n')
@@ -623,7 +748,15 @@ export function formatToolResult(result: ToolResult): string {
       return [
         `**${result.object.title ?? 'Untitled'}** (${result.object.type}, ${result.object.id})`,
         propLines ? `\nProperties:\n${propLines}` : '',
-        result.content ? `\n\n${result.content}` : '\n*(no content)*',
+        result.content
+          ? `\n\n${result.content}`
+          : result.availability === 'encrypted_locked'
+            ? '\n*(content is end-to-end encrypted and locked)*'
+            : result.availability === 'permission_denied'
+              ? '\n*(permission denied for content)*'
+              : result.availability === 'not_found'
+                ? '\n*(content not found)*'
+                : '\n*(no content)*',
       ].join('')
     }
     case 'created':
@@ -724,9 +857,60 @@ export function formatToolResult(result: ToolResult): string {
       return result.task_lists.map((l) => `- ${l.name} (${l.id})`).join('\n')
     case 'task_statuses':
       return result.statuses.join(', ')
+    case 'project_context': {
+      const header = [
+        `Workspace: ${result.workspace.name} (${result.workspace.id})`,
+        result.status === 'ok'
+          ? `Project: ${result.project.title} (${result.project.id})`
+          : result.status === 'ambiguous'
+            ? 'Project: ambiguous query'
+            : 'Project: not found',
+        `As of: ${result.asOf}`,
+      ]
+      if (result.status === 'ambiguous') {
+        return [...header, 'Candidates:', ...result.candidates.map((candidate) => `- ${candidate.title} (${candidate.id})`)].join('\n')
+      }
+      if (result.status === 'not_found') return header.join('\n')
+      return [
+        ...header,
+        'Blockers:',
+        ...(result.project.blockers.length ? result.project.blockers.map((item) => `- ${item}`) : ['- None']),
+        'Next actions:',
+        ...(result.project.nextActions.length ? result.project.nextActions.map((item) => `- ${item}`) : ['- None']),
+        'Citations:',
+        ...(result.project.sources.length
+          ? result.project.sources.map((source) => `- ${source.title ?? '(Untitled)'} [${source.sourceId}] ${source.deepLink}`)
+          : ['- None']),
+      ].join('\n')
+    }
+    case 'project_changes': {
+      const header = [
+        `Workspace: ${result.workspace.name} (${result.workspace.id})`,
+        result.status === 'ok' ? `Project: ${result.project.title} (${result.project.id})` : 'Project: not found',
+        `As of: ${result.asOf}`,
+      ]
+      if (result.status === 'not_found') return header.join('\n')
+      return [
+        ...header,
+        'Changes:',
+        ...(result.items.length
+          ? result.items.map((item) => `- ${item.updatedAt} ${item.type}: ${item.title ?? item.id} (${item.id})`)
+          : ['- None']),
+        `Next cursor: ${result.nextCursor ?? 'none'}`,
+        `Has more: ${result.hasMore}`,
+      ].join('\n')
+    }
     case 'no_op':
       return result.message
     case 'error':
       return `Error: ${result.message}`
+  }
+}
+
+export function toMcpToolCallResult(result: ToolResult): McpToolCallResult {
+  return {
+    content: [{ type: 'text', text: formatToolResult(result) }],
+    structuredContent: result,
+    isError: result.type === 'error',
   }
 }

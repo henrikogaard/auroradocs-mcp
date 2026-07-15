@@ -5,6 +5,8 @@ const REQUIRED_PATHS = [
   'README.md',
   'LICENSE',
   'NOTICE',
+  'docs/setup.md',
+  'docs/agent-profiles.md',
   'dist/index.js',
   'dist/version.js',
 ]
