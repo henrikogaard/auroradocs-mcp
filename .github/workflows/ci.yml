@@ -43,7 +43,7 @@ jobs:
         run: pnpm check
 
       - name: Audit production dependencies
-        run: pnpm audit --prod
+        run: npx --yes --package=node@22.13.0 --package=pnpm@11.13.0 pnpm audit --prod
 
       - name: Create dry-run package manifest
         run: npm pack --dry-run --ignore-scripts --json > package-manifest.json
