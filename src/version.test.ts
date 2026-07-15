@@ -3,5 +3,5 @@ import test from 'node:test'
 import { SERVER_VERSION } from './version.js'
 
 test('server version follows package metadata', () => {
-  assert.equal(SERVER_VERSION, '0.1.1')
+  assert.equal(SERVER_VERSION, '0.2.0')
 })

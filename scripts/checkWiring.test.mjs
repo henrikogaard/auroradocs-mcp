@@ -18,7 +18,7 @@ test('scoped npm package is configured for public trusted publishing', async () 
   const releaseWorkflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
 
   assert.equal(pkg.name, '@henrikogard/auroradocs-mcp')
-  assert.equal(pkg.version, '0.1.1')
+  assert.equal(pkg.version, '0.2.0')
   assert.equal(pkg.publishConfig?.access, 'public')
   assert.match(releaseWorkflow, /npm publish --provenance --access public/)
 })

@@ -210,9 +210,9 @@ to `read:objects` only.
 
 ## Phase 0 - Reliability and policy foundation
 
-**Status:** Runtime reliability work is implemented. AuroraCloud policy,
-client/grant enforcement, legacy-token migration, deployment, and live
-integration are pending under AuroraDocs issue #557.
+**Status:** Runtime reliability, AuroraCloud policy, client/grant enforcement,
+legacy-token migration, and deployment are implemented. The production grant
+lifecycle has passed live end-to-end verification.
 
 ### Deliverables
 
@@ -244,9 +244,10 @@ integration are pending under AuroraDocs issue #557.
 Phase 1 is the first user-facing workflow milestone.
 
 **Status:** The public MCP tools, prompt, resource template, and agent profiles
-are implemented. Production use of the multi-workspace and project-context
-workflow remains pending on the companion AuroraCloud work and live
-integration described above.
+are implemented. The companion AuroraCloud multi-workspace, policy, grant, and
+project-context APIs are deployed, and the production grant lifecycle has been
+verified end to end. Package release `0.2.0` makes this workflow publicly
+installable.
 
 ### `get_project_context`
 

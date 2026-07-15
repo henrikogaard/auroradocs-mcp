@@ -1,7 +1,7 @@
 # Setup
 
 This guide connects a local MCP client to owner-approved AuroraCloud workspace
-grants with `@henrikogard/auroradocs-mcp@0.1.1`. The server runs locally over
+grants with `@henrikogard/auroradocs-mcp@0.2.0`. The server runs locally over
 stdio; it is not a hosted MCP endpoint.
 
 ## Requirements
@@ -67,7 +67,7 @@ Generic stdio configuration:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "@henrikogard/auroradocs-mcp@0.1.1"],
+  "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.0"],
   "env": {
     "AURORA_API_URL": "https://api.auroradocs.eu",
     "AURORA_API_TOKEN": "REDACTED"
@@ -143,7 +143,7 @@ servers, then restart Claude Desktop:
   "mcpServers": {
     "auroradocs": {
       "command": "npx",
-      "args": ["-y", "@henrikogard/auroradocs-mcp@0.1.1"],
+      "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.0"],
       "env": {
         "AURORA_API_URL": "https://api.auroradocs.eu",
         "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
@@ -161,7 +161,7 @@ claude mcp add --transport stdio --scope user \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.1.1
+  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.0
 ```
 
 Run `claude mcp get auroradocs` to inspect the saved entry.
@@ -173,7 +173,7 @@ codex mcp add \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.1.1
+  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.0
 ```
 
 Run `codex mcp get auroradocs` to inspect the saved entry.
