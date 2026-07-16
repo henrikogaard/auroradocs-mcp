@@ -10,7 +10,7 @@
 
 **Tracking issue:** [#9 — Harden MCP runtime and add multi-workspace Resume work](https://github.com/henrikogaard/auroradocs-mcp/issues/9)
 
-**Companion plan:** [`auroradocs/docs/superpowers/plans/2026-07-14-mcp-policy-multi-workspace.md`](https://github.com/henrikogaard/auroradocs/blob/development/docs/superpowers/plans/2026-07-14-mcp-policy-multi-workspace.md)
+**Companion architecture:** [Public workspace policy and multi-workspace design](../../agent-planning-knowledge-roadmap.md#default-workspace-mcp-policy)
 
 ## Global Constraints
 

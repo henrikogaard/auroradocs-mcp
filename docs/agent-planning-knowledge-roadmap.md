@@ -1,31 +1,25 @@
 # Agent Planning and Knowledge Roadmap
 
 Date: 2026-07-14
-Status: Phase 0 runtime and Phase 1 Resume work implemented; AuroraCloud activation pending
+Status: Phase 0 runtime and Phase 1 Resume work delivered in `0.2.0`; later phases planned
 
 ## Implementation plans
 
 - [MCP runtime reliability and Resume work](superpowers/plans/2026-07-14-mcp-runtime-resume-work.md) — tracked in [issue #9](https://github.com/henrikogaard/auroradocs-mcp/issues/9)
-- [AuroraCloud workspace policy, multi-workspace grants, and project context](https://github.com/henrikogaard/auroradocs/blob/development/docs/superpowers/plans/2026-07-14-mcp-policy-multi-workspace.md)
+- [Workspace policy, multi-workspace grants, and project context](#recommended-architecture) — public architecture and delivery status are maintained in this roadmap
 
 ## Delivery status
 
-The public MCP runtime work is implemented on the branch tracked by
-[issue #9](https://github.com/henrikogaard/auroradocs-mcp/issues/9). This
-includes the delivered Phase 0 runtime reliability work and the Phase 1 Resume
-surfaces: granted-workspace discovery, explicit workspace selection,
+Phase 0 runtime reliability and the Phase 1 Resume workflow are available in
+production through package release `0.2.0`. The delivered surface includes
+granted-workspace discovery, explicit workspace selection,
 `get_project_context`, `list_project_changes`, the `resume_project` prompt, the
 project-context resource template, and bounded Hermes and OpenClaw profiles.
 
-Production activation is not complete. The companion AuroraCloud policy,
-client/grant, migration, and project-context API work remains tracked by
-[AuroraDocs issue #557](https://github.com/henrikogaard/auroradocs/issues/557);
-there is no companion implementation pull request to link yet. Its database
-migration, service deployment, and live end-to-end integration must be
-completed and verified before the new client-credential and Resume workflows
-can be described as available in production. The documented legacy
-workspace-token path remains the compatibility path until that activation is
-complete.
+The companion AuroraCloud workspace policy, client/grant, migration, and
+project-context APIs are deployed. The production grant lifecycle has passed
+live end-to-end verification. The documented legacy workspace-token path
+remains available as a compatibility path during migration.
 
 ## Purpose
 
@@ -93,7 +87,7 @@ server-side validation, authorization, pagination, or result shaping.
 
 ### Multi-workspace client identity
 
-The target model is one user-owned MCP client identity with independent
+The production model is one user-owned MCP client identity with independent
 owner-approved workspace grants. Registering a client identity grants no
 workspace access by itself.
 
@@ -132,9 +126,9 @@ unsafe when an agent or client can issue parallel calls.
 
 ### Transitional compatibility
 
-Until client identities and grants ship, users can configure one stdio server
-entry per workspace. This remains a supported fallback, but it is not the
-preferred long-term experience because it duplicates the tool catalog in agent
+Legacy workspace-scoped tokens remain supported during migration. Users can
+configure one stdio server entry per workspace as a fallback, but this is not
+the preferred experience because it duplicates the tool catalog in agent
 prompts.
 
 A local multi-token configuration bundle may be evaluated as a bridge only if

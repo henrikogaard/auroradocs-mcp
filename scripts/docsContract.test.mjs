@@ -37,6 +37,11 @@ test('every packaged Markdown document avoids superseded runtime contracts', asy
     assert.doesNotMatch(document, /Every call\s+is limited to the workspace in `AURORA_WORKSPACE_ID`/, entry)
     assert.doesNotMatch(document, /`get_project_context`[^\n]*optional `cursor`/, entry)
     assert.doesNotMatch(document, /expiresAt:\s*string(?!\s*\|)/, entry)
+    assert.doesNotMatch(
+      document,
+      /https:\/\/github\.com\/henrikogaard\/auroradocs(?:\/|$)/,
+      `${entry} links to the private AuroraDocs source repository`,
+    )
   }
 })
 
