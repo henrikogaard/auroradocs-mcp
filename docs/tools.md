@@ -1,8 +1,8 @@
 # Tools and scopes
 
-The current AuroraDocs MCP source exposes the tools below to a connected client.
-The latest published package remains 0.2.0; custom-database and Obsidian tools
-are **Unreleased** until the next package release. An
+The current AuroraDocs MCP `0.2.1` source exposes the tools below to a connected
+client. The latest published package remains `0.2.0`; custom-database and
+Obsidian tools require a local source build until `0.2.1` is released. An
 `aur_mcp_client_` credential can discover its independently granted workspaces
 with `list_workspaces`; every workspace data call then selects one grant with
 `workspace_id` or an unambiguous `workspace_alias`. A legacy `aur_mcp_` token

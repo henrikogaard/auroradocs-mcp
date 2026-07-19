@@ -5,9 +5,8 @@ granted AuroraCloud workspaces. It runs on your computer over stdio and sends
 authenticated requests to `https://api.auroradocs.eu`.
 
 The public package is `@henrikogard/auroradocs-mcp` and the executable is
-`aurora-mcp`. The latest published package is `0.2.0`; sections marked
-**Unreleased** describe the current source branch and require the next package
-release or a local source build.
+`aurora-mcp`. The latest published package is `0.2.0`; the current source
+version is `0.2.1` and requires its package release or a local source build.
 
 For an end-to-end installation walkthrough, use the dedicated
 [Setup guide](docs/setup.md). Hermes and OpenClaw users should also apply the
@@ -98,8 +97,8 @@ New client credentials require these environment variables:
 | --- | --- |
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
-| `AURORA_OBSIDIAN_VAULT_ROOT` | optional absolute path authorizing read-only analysis of one Obsidian vault (**Unreleased**) |
-| `AURORA_MCP_STATE_DIR` | optional private import-journal directory outside that vault (**Unreleased**) |
+| `AURORA_OBSIDIAN_VAULT_ROOT` | optional absolute path authorizing read-only analysis of one Obsidian vault (`0.2.1` source; not yet published) |
+| `AURORA_MCP_STATE_DIR` | optional private import-journal directory outside that vault (`0.2.1` source; not yet published) |
 
 Do not set `AURORA_WORKSPACE_ID` for a client credential. The server discovers
 only its owner-approved grants with `list_workspaces`; each data call then
@@ -181,7 +180,7 @@ The client must launch the process locally and communicate over stdio. Do not
 configure `https://api.auroradocs.eu` as an MCP HTTP/SSE URL; it is the API the
 local server calls, not a hosted MCP endpoint.
 
-## Custom databases and templates — Unreleased
+## Custom databases and templates — 0.2.1 source
 
 The current source can discover existing object types/templates, offer starter
 recipes for contacts, interests, equipment, subscriptions, and expenses, and
@@ -195,7 +194,7 @@ plan-before-apply flow. Templates can include a starter body and schema-declared
 defaults, but should never contain real credentials, payment data, or sensitive
 personal records.
 
-## Obsidian vault import — Unreleased
+## Obsidian vault import — 0.2.1 source
 
 Set `AURORA_OBSIDIAN_VAULT_ROOT` to one absolute local vault path only when you
 want to authorize read-only analysis. Import is a separate action: the server

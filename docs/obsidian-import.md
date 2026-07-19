@@ -1,6 +1,6 @@
 # Obsidian import
 
-> **Unreleased:** this guide describes the current source branch. The latest
+> **0.2.1 source:** this guide describes the current source branch. The latest
 > published npm package remains 0.2.0 and does not include these tools yet.
 
 The importer converts one explicitly authorized local Obsidian vault into an

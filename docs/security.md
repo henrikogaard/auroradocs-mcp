@@ -66,7 +66,7 @@ model. Browser-only workspaces and Local folders workspaces are unsupported.
 The server does not scan local AuroraDocs data or silently promote a workspace
 to AuroraCloud.
 
-## Local Obsidian vault boundary — Unreleased
+## Local Obsidian vault boundary — 0.2.1 source
 
 Obsidian access is disabled unless `AURORA_OBSIDIAN_VAULT_ROOT` names one
 absolute local directory. That setting authorizes read-only analysis only. The

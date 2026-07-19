@@ -62,8 +62,9 @@ Every new client entry provides these values:
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
 
-For the **Unreleased** Obsidian importer, add these only after backing up the
-source vault and choosing a test destination:
+For the `0.2.1` source Obsidian importer, add these only after backing up the
+source vault and choosing a test destination. It is not in the published
+`0.2.0` package:
 
 | Variable | Value |
 | --- | --- |

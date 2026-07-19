@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-20
+
 ### Added
 
 - Added additive custom object-type and reusable-template tools, including
@@ -11,8 +13,9 @@ All notable changes to this project are documented in this file.
   expenses plus arbitrary reviewable schemas.
 - Added a local, analyze-first Obsidian vault importer with safe YAML/Markdown
   and JSON Canvas conversion, wiki-link and attachment mapping, bounded plans,
-  explicit MCP elicitation or two-turn compatibility consent, resumable
-  idempotent batches, and content-free private journals.
+  explicit MCP elicitation or two-turn compatibility consent, resumable batches
+  with stable destination IDs and idempotent attachment uploads, and content-free
+  private journals.
 - Added `custom_database_design` and `obsidian_import` prompts plus coverage and
   workflow-recipe guidance for agents.
 
