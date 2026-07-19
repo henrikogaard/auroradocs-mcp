@@ -62,6 +62,17 @@ import type {
   ObjectTypeSchema,
   PropertyValueType,
 } from './customDatabases.js'
+import { resolveObsidianConfig } from './obsidian/config.js'
+import { openAuthorizedVault } from './obsidian/vaultAccess.js'
+import { analyzeObsidianVault } from './obsidian/analyzer.js'
+import {
+  buildObsidianImportPlan,
+  getObsidianImportPlanPage,
+  getStoredObsidianImportPlan,
+  storeObsidianImportPlan,
+  summarizeObsidianImportPlan,
+} from './obsidian/importPlan.js'
+import type { ObsidianGroupAdjustment, ObsidianImportPlanPreview } from './obsidian/importPlan.js'
 import type {
   AuroraConnectionContext,
   Availability,
@@ -97,6 +108,8 @@ export type ToolResult =
   | { type: 'templates'; templates: { id: string; title: string | null; type: string; icon: string | null }[] }
   | { type: 'template_created'; template: { id: string; title: string | null; type: string; icon: string | null } }
   | { type: 'template_instantiated'; template_id: string; object_id: string }
+  | { type: 'obsidian_import_plan'; plan: ObsidianImportPlanPreview }
+  | { type: 'obsidian_import_plan_page'; page: ReturnType<typeof getObsidianImportPlanPage> }
   | { type: 'week_plan'; plan: McpWeekPlan }
   | { type: 'canvas'; canvas: McpCanvasReadResult }
   | { type: 'scheduled_task_block'; id: string; title: string | null; due_date: string; mode: string }
@@ -234,6 +247,44 @@ function parseTemplateDefinition(value: unknown): CustomDatabaseTemplateDefiniti
   if (raw['body'] !== undefined && typeof raw['body'] !== 'string') throw new ToolInputError('template body must be text')
   const icon = raw['icon'] === null ? null : raw['icon'] === undefined ? undefined : readString(raw['icon'])
   return { title, ...(icon !== undefined ? { icon } : {}), ...(raw['body'] !== undefined ? { body: raw['body'] as string } : {}), ...(raw['defaults'] !== undefined ? { defaults: parseTemplateDefaults(raw['defaults']) } : {}) }
+}
+
+function parseObsidianAdjustments(value: unknown): ObsidianGroupAdjustment[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 100) throw new ToolInputError('adjustments must be an array with at most 100 items')
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new ToolInputError(`adjustment ${index + 1} must be an object`)
+    const raw = entry as Record<string, unknown>
+    const groupId = readString(raw['group_id'])
+    const action = readString(raw['action'])
+    if (!groupId || !action) throw new ToolInputError(`adjustment ${index + 1} requires group_id and action`)
+    if (action === 'accept' || action === 'reject') return { groupId, action }
+    if (action === 'rename') {
+      const name = readString(raw['name'])
+      if (!name) throw new ToolInputError('rename adjustment requires name')
+      return { groupId, action, name }
+    }
+    if (action === 'merge') {
+      const mergeWithGroupId = readString(raw['merge_with_group_id'])
+      if (!mergeWithGroupId) throw new ToolInputError('merge adjustment requires merge_with_group_id')
+      return { groupId, action, mergeWithGroupId }
+    }
+    if (action === 'split') {
+      const splitBy = readString(raw['split_by'])
+      if (splitBy !== 'folder' && splitBy !== 'explicit_type' && splitBy !== 'property_signature') {
+        throw new ToolInputError('split adjustment requires split_by: folder, explicit_type, or property_signature')
+      }
+      return { groupId, action, splitBy }
+    }
+    throw new ToolInputError(`Unknown adjustment action: ${action}`)
+  })
+}
+
+function readPolicy<T extends string>(input: Record<string, unknown>, key: string, allowed: readonly T[], fallback: T): T {
+  if (!Object.hasOwn(input, key)) return fallback
+  const value = readString(input[key])
+  if (!value || !allowed.includes(value as T)) throw new ToolInputError(`${key} must be one of: ${allowed.join(', ')}`)
+  return value as T
 }
 
 function todayDateKey(): string {
@@ -514,6 +565,39 @@ async function executeToolCallUnsafe(
 
       case 'get_custom_database_recipes':
         return { type: 'custom_database_recipes', recipes: CUSTOM_DATABASE_RECIPES.map(cloneRecipe) }
+
+      case 'analyze_obsidian_vault': {
+        let config
+        try { config = resolveObsidianConfig() } catch (error) {
+          throw new ToolInputError(error instanceof Error ? error.message : 'Obsidian vault authorization is unavailable')
+        }
+        const vault = await openAuthorizedVault(config)
+        const analysis = await analyzeObsidianVault(vault)
+        const plan = buildObsidianImportPlan(analysis, workspaceId, {
+          hierarchyPolicy: readPolicy(input, 'hierarchy_policy', ['spaces', 'parents', 'flatten'] as const, 'spaces'),
+          collisionPolicy: readPolicy(input, 'collision_policy', ['rename', 'skip', 'fail'] as const, 'rename'),
+          attachmentPolicy: readPolicy(input, 'attachment_policy', ['referenced', 'skip'] as const, 'referenced'),
+          unsupportedPolicy: readPolicy(input, 'unsupported_policy', ['preserve', 'skip'] as const, 'preserve'),
+          adjustments: parseObsidianAdjustments(input['adjustments']),
+        })
+        storeObsidianImportPlan(plan, analysis)
+        return { type: 'obsidian_import_plan', plan: summarizeObsidianImportPlan(plan) }
+      }
+
+      case 'get_obsidian_import_plan': {
+        const planId = readString(input['plan_id'])
+        if (!planId) return invalidInput('Plan ID is required')
+        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        if (!stored) return notFound('Obsidian import plan was not found for this workspace')
+        if (Date.now() >= Date.parse(stored.plan.expiresAt)) return invalidInput('Obsidian import plan has expired; analyze the vault again')
+        const section = readString(input['section']) ?? 'groups'
+        if (section !== 'groups' && section !== 'entries' && section !== 'warnings') return invalidInput('section must be groups, entries, or warnings')
+        const page = readBoundedInteger(input, 'page', { defaultValue: 1, min: 1, max: 10_000 })
+        if (!page.ok) return invalidInput(page.message)
+        const perPage = readBoundedInteger(input, 'per_page', { defaultValue: 50, min: 1, max: 100 })
+        if (!perPage.ok) return invalidInput(perPage.message)
+        return { type: 'obsidian_import_plan_page', page: getObsidianImportPlanPage(stored.plan, section, page.value, perPage.value) }
+      }
 
       case 'list_object_types': {
         const objectTypes = await listAuroraObjectTypes(workspaceId)
@@ -1076,6 +1160,16 @@ export function formatToolResult(result: ToolResult): string {
       return `Template created: ${result.template.title ?? '(Untitled)'} (${result.template.id})`
     case 'template_instantiated':
       return `Created ${result.object_id} from template ${result.template_id}`
+    case 'obsidian_import_plan':
+      return [
+        `Obsidian plan ${result.plan.planId} (${result.plan.planHash})`,
+        `Vault: ${result.plan.vaultDisplayName}; workspace: ${result.plan.workspaceId}`,
+        `Notes: ${result.plan.counts.notes}; templates: ${result.plan.counts.templates}; Canvas: ${result.plan.counts.canvases}; attachments: ${result.plan.counts.attachments}`,
+        `Groups: ${result.plan.groups.map((group) => `${group.name} (${group.noteCount})`).join(', ') || 'none'}`,
+        result.plan.nextAction,
+      ].join('\n')
+    case 'obsidian_import_plan_page':
+      return JSON.stringify(result.page, null, 2)
     case 'week_plan':
       return [
         `Week ${result.plan.range.start} to ${result.plan.range.end}`,

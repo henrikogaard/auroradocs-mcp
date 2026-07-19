@@ -202,6 +202,8 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
     list_templates: 'read',
     create_template: 'write',
     create_from_template: 'write',
+    analyze_obsidian_vault: 'read',
+    get_obsidian_import_plan: 'read',
     create_object: 'write',
     create_task: 'write',
     update_task: 'write',
@@ -220,7 +222,7 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
 })
 
 test('every tool declares output schema and accurate effect annotations', () => {
-  const localReadTools = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
+  const localReadTools = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan'])
   const nonIdempotentTools = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template'])
   const successResultTypes: Record<string, string[]> = {
     list_workspaces: ['workspaces'],
@@ -251,6 +253,8 @@ test('every tool declares output schema and accurate effect annotations', () => 
     list_templates: ['templates'],
     create_template: ['template_created'],
     create_from_template: ['template_instantiated'],
+    analyze_obsidian_vault: ['obsidian_import_plan'],
+    get_obsidian_import_plan: ['obsidian_import_plan_page'],
     create_object: ['created'],
     create_task: ['task_created'],
     update_task: ['task_updated'],

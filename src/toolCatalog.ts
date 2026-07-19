@@ -90,6 +90,8 @@ const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
   list_templates: 'read',
   create_template: 'write',
   create_from_template: 'write',
+  analyze_obsidian_vault: 'read',
+  get_obsidian_import_plan: 'read',
   create_object: 'write',
   create_task: 'write',
   update_task: 'write',
@@ -571,6 +573,8 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
   list_templates: [resultSchema('templates', { templates: { type: 'array', items: TEMPLATE_SUMMARY_SCHEMA } }, ['templates'])],
   create_template: [resultSchema('template_created', { template: TEMPLATE_SUMMARY_SCHEMA }, ['template'])],
   create_from_template: [resultSchema('template_instantiated', { template_id: stringSchema, object_id: stringSchema }, ['template_id', 'object_id'])],
+  analyze_obsidian_vault: [resultSchema('obsidian_import_plan', { plan: { type: 'object', additionalProperties: true } }, ['plan'])],
+  get_obsidian_import_plan: [resultSchema('obsidian_import_plan_page', { page: { type: 'object', additionalProperties: true } }, ['page'])],
   get_project_context: [
     resultSchema('project_context', {
       status: { const: 'ok' },
@@ -635,7 +639,7 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
 }
 
 const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template'])
-const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
+const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan'])
 const WORKSPACE_SELECTOR_FREE_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
 
 type McpToolDeclaration = Omit<McpToolDefinition, 'title' | 'outputSchema' | 'annotations'>
@@ -939,6 +943,50 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
         object_id: { type: 'string', description: 'Optional planned 15-character object ID for resume-safe workflows' },
       },
       required: ['template_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'analyze_obsidian_vault',
+    description: 'Read the single locally authorized Obsidian vault, infer a reviewable destination plan, and perform zero AuroraCloud writes. Raw note bodies are not returned.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        hierarchy_policy: { type: 'string', enum: ['spaces', 'parents', 'flatten'] },
+        collision_policy: { type: 'string', enum: ['rename', 'skip', 'fail'] },
+        attachment_policy: { type: 'string', enum: ['referenced', 'skip'] },
+        unsupported_policy: { type: 'string', enum: ['preserve', 'skip'] },
+        adjustments: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              group_id: stringSchema,
+              action: { type: 'string', enum: ['accept', 'rename', 'reject', 'merge', 'split'] },
+              name: stringSchema,
+              merge_with_group_id: stringSchema,
+              split_by: { type: 'string', enum: ['folder', 'explicit_type', 'property_signature'] },
+            },
+            required: ['group_id', 'action'],
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_obsidian_import_plan',
+    description: 'Read a bounded page of an existing Obsidian import plan without rescanning or writing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_id: stringSchema,
+        section: { type: 'string', enum: ['groups', 'entries', 'warnings'] },
+        page: { type: 'integer', minimum: 1, maximum: 10000 },
+        per_page: { type: 'integer', minimum: 1, maximum: 100 },
+      },
+      required: ['plan_id'],
       additionalProperties: false,
     },
   },
