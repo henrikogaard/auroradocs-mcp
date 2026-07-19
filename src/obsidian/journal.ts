@@ -27,7 +27,7 @@ export type ImportJournal = {
   groups: Record<string, { objectTypeId: string; status: 'pending' | 'complete' | 'failed'; errorCode?: string }>
   containers: Record<string, { objectId: string; status: 'pending' | 'complete' | 'failed'; errorCode?: string }>
   entries: Record<string, ImportJournalItem>
-  attachments: Record<string, { attachmentId: string; parentObjectId: string; status: 'pending' | 'complete' | 'failed'; errorCode?: string }>
+  attachments: Record<string, { attachmentId: string; parentObjectId: string; url?: string; status: 'pending' | 'complete' | 'failed'; errorCode?: string }>
   startedAt: string
   updatedAt: string
 }

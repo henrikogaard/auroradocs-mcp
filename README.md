@@ -210,6 +210,10 @@ and never modify the source. Back up both systems first and start
 with a small test workspace. See [Obsidian import](docs/obsidian-import.md) for
 configuration, mapping, consent, recovery, and fidelity limits.
 
+Analysis rejects more than 256 MiB of eligible Markdown/Canvas source files,
+and hidden, plugin, Git, cache, trash, and other ignored paths cannot be read as
+attachments even when vault content links to them.
+
 ## Verify read-only access first
 
 1. Grant the client one workspace with only `read:objects`.

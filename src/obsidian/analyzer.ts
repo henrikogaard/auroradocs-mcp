@@ -60,6 +60,7 @@ export type VaultAnalysisSummary = {
   warnings: string[]
   requiresConfirmation: true
 }
+export const OBSIDIAN_VAULT_TOTAL_SOURCE_MAX_BYTES = 256 * 1024 * 1024
 
 function sha256(value: string | Buffer): string {
   return createHash('sha256').update(value).digest('hex')
@@ -157,6 +158,9 @@ function resolveWikiLinks(notes: AnalyzedNote[]): ResolvedVaultLink[] {
 
 export async function analyzeObsidianVault(vault: AuthorizedVault, now = new Date()): Promise<VaultAnalysis> {
   const sourceFiles = await vault.listSourceFiles()
+  if (sourceFiles.reduce((total, file) => total + file.sizeBytes, 0) > OBSIDIAN_VAULT_TOTAL_SOURCE_MAX_BYTES) {
+    throw new Error('Obsidian vault source files exceed the 256 MiB analysis limit.')
+  }
   const warnings: string[] = []
   const sources = new Map<string, string>()
   for (const file of sourceFiles) sources.set(file.relativePath, (await vault.readText(file.relativePath)).text)

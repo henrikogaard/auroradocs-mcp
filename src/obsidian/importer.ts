@@ -55,7 +55,7 @@ function defaults(): ObsidianImportDependencies {
   }
 }
 
-function digest(value: string): string { return createHash('sha256').update(value).digest('hex') }
+function digest(value: string | Buffer): string { return createHash('sha256').update(value).digest('hex') }
 function schemasEqual(left: ObjectTypeSchema[], right: ObjectTypeSchema[]): boolean {
   return JSON.stringify(validateCustomDatabaseSchema(left)) === JSON.stringify(validateCustomDatabaseSchema(right))
 }
@@ -75,7 +75,9 @@ function blocked(stored: StoredObsidianImportPlan, code: string): ObsidianImport
   return { status: 'blocked', planId: stored.plan.planId, planHash: stored.plan.planHash, completed: 0, failed: 0, remaining: stored.plan.entries.length, nextCursor: null, warnings: [{ code }] }
 }
 
-function attachmentJournalKey(sourceHash: string): string { return `attachment_${sourceHash}` }
+function attachmentJournalKey(attachment: { sourceHash: string; relativePath: string }): string {
+  return `attachment_${digest(`${attachment.relativePath}\0${attachment.sourceHash}`)}`
+}
 
 function validateCapabilities(
   capability: AuroraImportCapabilities,
@@ -89,7 +91,7 @@ function validateCapabilities(
   if (stored.plan.attachmentPolicy === 'referenced' && stored.analysis.attachments.length) {
     if (!capability.storage.available) return 'attachment_storage_unavailable'
     const remainingAttachments = stored.analysis.attachments.filter(
-      (item) => journal?.attachments[attachmentJournalKey(item.sourceHash)]?.status !== 'complete',
+      (item) => journal?.attachments[attachmentJournalKey(item)]?.status !== 'complete',
     )
     const totalBytes = remainingAttachments.reduce((sum, item) => sum + item.sizeBytes, 0)
     if (remainingAttachments.some((item) => item.sizeBytes > capability.upload.maxBytes)) return 'attachment_too_large'
@@ -102,7 +104,7 @@ function resultFromJournal(stored: StoredObsidianImportPlan, journal: ImportJour
   const values = Object.values(journal.entries)
   const completed = values.filter((entry) => entry.status === 'complete').length
   const attachmentValues = stored.plan.attachmentPolicy === 'referenced'
-    ? stored.analysis.attachments.map((attachment) => journal.attachments[attachmentJournalKey(attachment.sourceHash)])
+    ? stored.analysis.attachments.map((attachment) => journal.attachments[attachmentJournalKey(attachment)])
     : []
   const failed = values.filter((entry) => entry.status === 'failed').length
     + attachmentValues.filter((entry) => entry?.status === 'failed').length
@@ -339,26 +341,27 @@ export async function runObsidianImportBatch(
 
   if (stored.plan.attachmentPolicy === 'referenced') {
     const attachmentBatch = stored.analysis.attachments
-      .filter((item) => journal.attachments[attachmentJournalKey(item.sourceHash)]?.status !== 'complete')
+      .filter((item) => journal.attachments[attachmentJournalKey(item)]?.status !== 'complete')
       .filter((item) => item.referencedBy.some((source) => {
         const entry = stored.plan.entries.find((candidate) => candidate.relativePath === source)
         return Boolean(entry && (journal.entries[entry.id]?.phase === 'object' || journal.entries[entry.id]?.status === 'complete'))
       }))
       .slice(0, batchSize)
     for (const attachment of attachmentBatch) {
-      const key = attachmentJournalKey(attachment.sourceHash)
+      const key = attachmentJournalKey(attachment)
       if (journal.attachments[key]?.status === 'complete') continue
       const parentEntry = attachment.referencedBy.map((source) => stored.plan.entries.find((entry) => entry.relativePath === source))
         .find((entry) => entry && journal?.entries[entry.id]?.phase === 'object' || entry && journal?.entries[entry.id]?.status === 'complete')
       if (!parentEntry) continue
       try {
         const bytes = await vault.readAsset(attachment.relativePath, capability.upload.maxBytes)
+        if (digest(bytes) !== attachment.sourceHash) throw new Error('attachment source changed')
         const uploaded = await dependencies.uploadAttachment({
           workspaceId: stored.plan.workspaceId, objectId: parentEntry.objectId,
           fileName: path.posix.basename(attachment.relativePath), mimeType: mimeType(attachment.relativePath), bytes,
-          idempotencyKey: `obsidian:${digest(`${stored.plan.planHash}:${attachment.sourceHash}`).slice(0, 64)}`,
+          idempotencyKey: `obsidian:${digest(`${stored.plan.planHash}:${attachment.relativePath}:${attachment.sourceHash}`).slice(0, 64)}`,
         })
-        journal.attachments[key] = { attachmentId: uploaded.id, parentObjectId: parentEntry.objectId, status: 'complete' }
+        journal.attachments[key] = { attachmentId: uploaded.id, parentObjectId: parentEntry.objectId, url: uploaded.url, status: 'complete' }
       } catch (error) {
         const code = safeErrorCode(error); journal.attachments[key] = { attachmentId: '', parentObjectId: parentEntry.objectId, status: 'failed', errorCode: code }; warnings.push({ code })
       }
@@ -368,8 +371,8 @@ export async function runObsidianImportBatch(
 
   const attachmentDestinations = new Map<string, AttachmentDestination>()
   for (const attachment of stored.analysis.attachments) {
-    const saved = journal.attachments[attachmentJournalKey(attachment.sourceHash)]
-    if (saved?.status === 'complete') attachmentDestinations.set(attachment.relativePath, { attachmentId: saved.attachmentId, url: `/api/files/attachments/${saved.attachmentId}/${encodeURIComponent(path.posix.basename(attachment.relativePath))}` })
+    const saved = journal.attachments[attachmentJournalKey(attachment)]
+    if (saved?.status === 'complete' && saved.url) attachmentDestinations.set(attachment.relativePath, { attachmentId: saved.attachmentId, url: saved.url })
   }
   const objectIdsByPath = new Map(stored.plan.entries.map((entry) => [entry.relativePath, entry.objectId]))
   for (const entry of pending) {
@@ -388,7 +391,7 @@ export async function runObsidianImportBatch(
         if (stored.plan.attachmentPolicy === 'referenced') {
           const missingAttachment = stored.analysis.attachments.find(
             (attachment) => attachment.referencedBy.includes(entry.relativePath)
-              && journal.attachments[attachmentJournalKey(attachment.sourceHash)]?.status !== 'complete',
+              && journal.attachments[attachmentJournalKey(attachment)]?.status !== 'complete',
           )
           if (missingAttachment) throw new Error('attachment prerequisite failed')
         }

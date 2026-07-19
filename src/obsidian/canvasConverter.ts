@@ -4,10 +4,10 @@ import type { AnalyzedCanvas } from './analyzer.js'
 import type { AttachmentDestination } from './contentConverter.js'
 
 type CanvasCard = {
-  id: string; type: string; x: number | null; y: number | null; width: number | null; height: number | null
+  id: string; type: string; x: number | null; y: number | null; w: number | null; h: number | null
   text: string | null; color: string | null; objectId: string | null; attachmentId: string | null; url: string | null
 }
-type CanvasFrame = { id: string; label: string | null; x: number | null; y: number | null; width: number | null; height: number | null; color: string | null }
+type CanvasFrame = { id: string; label: string | null; x: number | null; y: number | null; w: number | null; h: number | null; color: string | null }
 type CanvasEdge = { id: string; fromCard: string | null; toCard: string | null; fromSide: string | null; toSide: string | null; label: string | null; color: string | null; arrow: string | null }
 
 function string(value: unknown): string | null { return typeof value === 'string' && value.trim() ? value.trim() : null }
@@ -35,7 +35,7 @@ export function convertObsidianCanvas(
     let id = originalId
     if (used.has(id)) { id = fallbackId(`${canvas.relativePath}:${originalId}:${index}`); warnings.push(`Duplicate Canvas node ID ${originalId} was remapped.`) }
     used.add(id); if (!firstMappedId.has(originalId)) firstMappedId.set(originalId, id)
-    const common = { id, x: number(node['x']), y: number(node['y']), width: number(node['width']), height: number(node['height']), color: string(node['color']) }
+    const common = { id, x: number(node['x']), y: number(node['y']), w: number(node['width'] ?? node['w']), h: number(node['height'] ?? node['h']), color: string(node['color']) }
     const type = string(node['type']) ?? 'unknown'
     if (type === 'group') {
       frames.push({ ...common, label: string(node['label']) }); continue

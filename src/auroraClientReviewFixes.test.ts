@@ -5,8 +5,10 @@ import type { AddressInfo } from 'node:net'
 import {
   createAuroraObjectFromTemplate,
   createAuroraObjectStable,
+  listAuroraObjectTypes,
   listAuroraTemplates,
   resetAuroraClientForTests,
+  upsertAuroraPropertyStable,
 } from './auroraClient.js'
 
 async function bodyOf(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -135,5 +137,45 @@ test('template instantiation copies all 64 declared defaults across property pag
     assert.equal(objectId, 'created-64')
     assert.equal(propertyWrites.length, 64)
     assert.equal(propertyWrites.at(-1), 'field_63')
+  })
+})
+
+test('object type discovery reads every reported page', async () => {
+  const pages: number[] = []
+  await withServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    res.setHeader('content-type', 'application/json')
+    if (req.method === 'GET' && url.pathname === '/api/collections/object_types/records') {
+      const page = Number(url.searchParams.get('page') ?? '1'); pages.push(page)
+      res.end(JSON.stringify({ page, perPage: 50, totalItems: 3, totalPages: 3, items: [{
+        id: `type-${page}`, workspace_id: 'workspace-1', name: `Type ${page}`, icon: null, color: null,
+        schema: [], created_at: 'now', updated_at: 'now',
+      }] })); return
+    }
+    res.statusCode = 404; res.end(JSON.stringify({ code: 'not_found' }))
+  }, async () => {
+    assert.equal((await listAuroraObjectTypes('workspace-1')).length, 3)
+    assert.deepEqual(pages, [1, 2, 3])
+  })
+})
+
+test('property type changes clear obsolete value columns', async () => {
+  let updateBody: Record<string, unknown> | null = null
+  await withServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    res.setHeader('content-type', 'application/json')
+    if (req.method === 'GET' && url.pathname === '/api/collections/objects/records/object-property') {
+      res.end(JSON.stringify({ id: 'object-property', workspace_id: 'workspace-1', type: 'page', title: 'Page', icon: null, parent_id: null, is_deleted: false, is_template: false, created_at: 'now', updated_at: 'now' })); return
+    }
+    if (req.method === 'GET' && url.pathname === '/api/collections/object_properties/records') {
+      res.end(JSON.stringify({ page: 1, perPage: 1, totalItems: 1, totalPages: 1, items: [{ id: 'property-existing' }] })); return
+    }
+    if (req.method === 'PATCH' && url.pathname.endsWith('/property-existing')) {
+      updateBody = await bodyOf(req); res.end(JSON.stringify({ id: 'property-existing', ...updateBody })); return
+    }
+    res.statusCode = 404; res.end(JSON.stringify({ code: 'not_found' }))
+  }, async () => {
+    await upsertAuroraPropertyStable('object-property', 'workspace-1', 'rating', 'number', 4)
+    assert.deepEqual(updateBody, { value_type: 'number', value_text: null, value_num: 4, value_date: null, value_bool: null, value_ref: null })
   })
 })

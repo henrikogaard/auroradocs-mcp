@@ -83,3 +83,15 @@ test('unsupported skip policy omits dynamic plugin blocks and unresolved fallbac
   assert.doesNotMatch(serialized, /LIST FROM|Missing note/)
   assert.ok(result.warnings.some((warning) => /skipped/i.test(warning)))
 })
+
+test('standard local Markdown links resolve to Aurora objects and uploaded attachments', () => {
+  const result = convertObsidianMarkdown('[Ada](People/Ada.md) and [manual](Assets/manual.pdf)', {
+    sourcePath: 'Home.md', resolvedLinks: [],
+    objectIdsByPath: new Map([['People/Ada.md', 'object-ada']]),
+    attachmentsByPath: new Map([['Assets/manual.pdf', { attachmentId: 'attachment-manual', url: '/canonical/manual' }]]),
+  })
+  const serialized = JSON.stringify(result.document)
+  assert.match(serialized, /\/object\/object-ada/)
+  assert.match(serialized, /\/canonical\/manual/)
+  assert.deepEqual(result.referencedAttachmentIds, ['attachment-manual'])
+})

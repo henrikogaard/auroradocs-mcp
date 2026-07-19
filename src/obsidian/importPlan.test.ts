@@ -109,6 +109,31 @@ test('container planning includes folders that contain only Canvas files', async
   assert.ok(plan.containers.some((container) => container.folder === 'CanvasOnly/Nested'))
 })
 
+test('template mapping survives absent group inference and invalid frontmatter keys are skipped', async () => {
+  const analysis = await fixtureAnalysis()
+  const source = analysis.notes[0]!
+  const templatePath = 'Templates/Generic.md'
+  const adjusted = {
+    ...analysis,
+    notes: [...analysis.notes, {
+      ...source,
+      relativePath: templatePath,
+      folder: 'Templates',
+      sourceHash: 'generic-template-hash',
+      isTemplate: true,
+      frontmatter: { '---': 'ignored', ['x'.repeat(80)]: 'ignored' },
+      frontmatterShapes: { '---': 'string' as const },
+    }],
+  }
+  const plan = buildObsidianImportPlan(adjusted, 'workspace-1', {
+    ids: { planId: 'obsidian-plan-template-independent' },
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const entry = plan.entries.find((candidate) => candidate.relativePath === templatePath)
+  assert.equal(entry?.mapping, 'template')
+  assert.equal(entry?.groupId, null)
+})
+
 test('plan validation rejects foreign, expired, tampered, root-changed, and inventory-changed plans', async () => {
   const analysis = await fixtureAnalysis()
   const plan = buildObsidianImportPlan(analysis, 'workspace-1', {

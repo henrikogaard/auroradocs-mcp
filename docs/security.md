@@ -71,11 +71,11 @@ to AuroraCloud.
 Obsidian access is disabled unless `AURORA_OBSIDIAN_VAULT_ROOT` names one
 absolute local directory. That setting authorizes read-only analysis only. The
 reader pins the canonical root identity, rejects root and child symlinks,
-absolute child paths, traversal, changed roots, oversized inputs, and excessive
-entry counts. It allowlists Markdown, JSON Canvas, referenced attachments, and
+absolute child paths, traversal, changed roots, source inventories above 256 MiB,
+oversized inputs, and excessive entry counts. It allowlists Markdown, JSON Canvas, referenced attachments, and
 the small `.obsidian` configuration needed for Templates; plugin data,
 executables, `.git`, trash, caches, environment files, parents, and siblings are
-not scanned. No parser fetches remote URLs and the source vault is never
+not scanned and cannot be read as attachments. No parser fetches remote URLs and the source vault is never
 modified.
 
 Import requires a separate, exact plan ID/hash acceptance. Form-capable MCP

@@ -59,3 +59,13 @@ test('plan and apply custom database uses the exact approved hash and is idempot
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }
 })
+
+test('direct template creation rejects unsupported default value types before network access', async () => {
+  const result = await executeToolCall('create_template', {
+    type: 'page',
+    title: 'Invalid default',
+    defaults: [{ key: 'score', value_type: 'formula', value: '1 + 1' }],
+  }, 'workspace-1')
+  assert.equal(result.type, 'error')
+  if (result.type === 'error') assert.match(result.message, /unsupported value_type/i)
+})

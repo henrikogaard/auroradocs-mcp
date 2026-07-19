@@ -224,7 +224,7 @@ export function buildObsidianImportPlan(analysis: VaultAnalysis, workspaceId: st
       return {
         id: `entry_${hash(`${planId}:${note.relativePath}:${note.sourceHash}`).slice(0, 12)}`,
         relativePath: note.relativePath, sourceHash: note.sourceHash, kind: 'note' as const,
-        mapping: note.isTemplate && accepted ? 'template' as const : accepted ? 'custom' as const : 'page' as const,
+        mapping: note.isTemplate ? 'template' as const : accepted ? 'custom' as const : 'page' as const,
         groupId: accepted ? group?.id ?? null : null,
         objectId: newAuroraId(),
       }

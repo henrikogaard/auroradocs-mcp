@@ -108,6 +108,11 @@ metadata are preserved only as readable text/warnings or omitted by the
 approved `skip` policy. Always compare a
 sample of complex notes and canvases in the test workspace.
 
+Eligible Markdown, Canvas, and Templates configuration source files have an
+aggregate 256 MiB analysis limit in addition to the per-file limit. Hidden,
+plugin, Git, cache, trash, and other ignored paths are excluded from both source
+analysis and attachment reads, including when a note or Canvas references them.
+
 ## Batches, status, and recovery
 
 One import call processes 50 entries by default and never more than 100. Call
@@ -139,6 +144,10 @@ restart reloads the approved plan metadata, re-analyzes the authorized vault,
 and resumes only when workspace, root, inventory, plan hash, and expiry still
 match. If the source inventory changed, the old plan is stale and cannot be
 silently resumed.
+
+Attachment journal identities bind both the approved relative path and content
+hash. Bytes are rehashed immediately before upload, and imported content reuses
+the canonical URL returned by AuroraCloud.
 
 ## Preflight failures
 

@@ -270,6 +270,9 @@ function parseTemplateDefaults(value: unknown): CustomDatabaseTemplateDefault[] 
     const valueType = readString(raw['value_type'] ?? raw['valueType']) as PropertyValueType | null
     const defaultValue = raw['value']
     if (!key || !valueType) throw new ToolInputError(`template default ${index + 1} requires key and value_type`)
+    if (!['text', 'number', 'progress', 'date', 'boolean', 'relation', 'select', 'multi_select', 'url', 'email', 'phone', 'file', 'person', 'location'].includes(valueType)) {
+      throw new ToolInputError(`template default "${key}" has an unsupported value_type`)
+    }
     if (defaultValue !== null && typeof defaultValue !== 'string' && typeof defaultValue !== 'number' && typeof defaultValue !== 'boolean') {
       throw new ToolInputError(`template default "${key}" has an unsupported value`)
     }

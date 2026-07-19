@@ -56,6 +56,8 @@ test('authorized vault lists deterministic safe files and ignores hidden/plugin/
     'People/Ada.md',
   ])
   assert.equal((await vault.readText('People/Ada.md')).text, '# Ada\n')
+  await assert.rejects(() => vault.readAsset('.git/config'), /ignored/i)
+  await assert.rejects(() => vault.readAsset('.obsidian/plugins/unsafe/main.js'), /ignored/i)
   assert.equal(await treeHash(root), before)
 })
 

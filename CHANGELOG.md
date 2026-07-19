@@ -18,6 +18,12 @@ All notable changes to this project are documented in this file.
 - Filtered templates before pagination, copied all 64 bounded template defaults,
   normalized null optional fields for stable retries, and preserved existing
   requiredness during additive schema updates.
+- Skipped unimportable frontmatter keys while preserving template identity,
+  bounded aggregate vault source memory, blocked ignored-path attachments,
+  keyed duplicate-byte attachments by path, verified live bytes, persisted the
+  canonical upload URL, stored Canvas dimensions compatibly, resolved local
+  Markdown links, rejected unsupported template default types before writes,
+  cleared obsolete property columns, and paged through all object types.
 
 ## [0.2.1] - 2026-07-20
 

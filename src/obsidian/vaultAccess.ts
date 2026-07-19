@@ -160,6 +160,9 @@ export class AuthorizedVault {
 
   async readAsset(relativePath: string, maxBytes = 64 * 1024 * 1024): Promise<Buffer> {
     const resolved = await this.#resolveSafeFile(relativePath)
+    if (shouldIgnore(resolved.relativePath) || resolved.relativePath === '.obsidian/templates.json') {
+      throw new Error('Ignored vault paths cannot be read as attachments.')
+    }
     const info = await lstat(resolved.absolutePath)
     if (!info.isFile()) throw new Error('Vault asset path is not a file.')
     if (info.size > maxBytes) throw new Error('Vault asset exceeds the allowed upload size.')

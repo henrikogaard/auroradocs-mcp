@@ -392,14 +392,15 @@ export async function listAuroraObjectTypes(workspaceId: string): Promise<Object
   const client = getAuroraClient()
   const filter = client.filter('workspace_id = {:wid}', { wid: workspaceId })
   const output: ObjectTypeDef[] = []
-  for (let page = 1; page <= 2; page += 1) {
+  for (let page = 1; page <= 100; page += 1) {
     const response = await client.collection('object_types').listPage({ filter, sort: 'created_at', page, perPage: 50 })
     const mapped = response.items.map(mapObjectType)
     if (mapped.some((entry) => entry.workspace_id !== workspaceId)) throw new Error('Object type lookup returned a foreign workspace record')
     output.push(...mapped)
     if (!response.totalPages || page >= response.totalPages) break
+    if (page === 100) throw new Error('Object type lookup exceeded its safety page limit')
   }
-  return output.slice(0, 100)
+  return output
 }
 
 export async function createAuroraObjectType(
@@ -477,7 +478,15 @@ export async function upsertAuroraPropertyStable(
   const storedValue = (valueType === 'multi_select' && typeof value === 'string' && !value.startsWith('['))
     ? JSON.stringify(value.split(',').map((entry) => entry.trim()).filter(Boolean))
     : value
-  const body = { value_type: valueType, [fieldName]: storedValue }
+  const body = {
+    value_type: valueType,
+    value_text: null,
+    value_num: null,
+    value_date: null,
+    value_bool: null,
+    value_ref: null,
+    [fieldName]: storedValue,
+  }
   if (existing.items[0]?.['id']) await client.collection('object_properties').update(String(existing.items[0]['id']), body)
   else await client.collection('object_properties').create({ object_id: objectId, key, ...body })
 }
@@ -871,7 +880,15 @@ export async function upsertProperty(
     value
 
   if (existing.items.length > 0) {
-    await client.collection('object_properties').update(String(existing.items[0].id), { value_type: valueType, [valueField]: parsedValue })
+    await client.collection('object_properties').update(String(existing.items[0].id), {
+      value_type: valueType,
+      value_text: null,
+      value_num: null,
+      value_date: null,
+      value_bool: null,
+      value_ref: null,
+      [valueField]: parsedValue,
+    })
   } else {
     await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: parsedValue })
   }

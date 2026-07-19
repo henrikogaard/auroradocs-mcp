@@ -19,6 +19,9 @@ test('Canvas conversion maps text, file, web, group nodes and remaps colliding I
   assert.ok(result.content.cards.some((card) => card.objectId === 'object-ada'))
   assert.ok(result.content.cards.some((card) => card.url === 'https://example.test'))
   assert.equal(result.content.frames[0]?.label, 'Context')
+  assert.equal(result.content.cards[0]?.w, 200)
+  assert.equal(result.content.cards[0]?.h, 100)
+  assert.equal(Object.hasOwn(result.content.cards[0] ?? {}, 'width'), false)
   assert.ok(result.warnings.some((warning) => /duplicate|collid/i.test(warning)))
 })
 

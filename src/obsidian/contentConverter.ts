@@ -83,7 +83,22 @@ function inlineNodes(source: string, context: MarkdownConversionContext, warning
       }
     } else if (raw.startsWith('[')) {
       const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(raw)
-      nodes.push(textNode(link?.[1] ?? raw, link ? [{ type: 'link', attrs: { href: link[2] } }] : undefined))
+      if (!link) nodes.push(textNode(raw))
+      else {
+        const target = markdownDestination(link[2])
+        const localPath = safeVaultReference(context.sourcePath, target)
+        const objectId = context.objectIdsByPath.get(target) ?? (localPath ? context.objectIdsByPath.get(localPath) : undefined)
+        const attachment = context.attachmentsByPath.get(target) ?? (localPath ? context.attachmentsByPath.get(localPath) : undefined)
+        if (objectId) nodes.push(textNode(link[1], [{ type: 'link', attrs: { href: `/object/${objectId}` } }]))
+        else if (attachment) {
+          attachmentIds.add(attachment.attachmentId)
+          nodes.push(textNode(link[1], [{ type: 'link', attrs: { href: attachment.url } }]))
+        } else if (/^(?:https?:|mailto:|tel:|#|\/)/i.test(target)) nodes.push(textNode(link[1], [{ type: 'link', attrs: { href: target } }]))
+        else {
+          if (context.unsupportedPolicy !== 'skip') nodes.push(textNode(link[1]))
+          warnings.push(`Unresolved local Markdown link ${target} was ${context.unsupportedPolicy === 'skip' ? 'skipped' : 'preserved as readable text'}.`)
+        }
+      }
     } else if (raw.startsWith('**') || raw.startsWith('__')) {
       nodes.push(textNode(raw.slice(2, -2), [{ type: 'bold' }]))
     } else if (raw.startsWith('`')) {

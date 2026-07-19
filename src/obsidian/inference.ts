@@ -83,8 +83,9 @@ function inferSchema(notes: AnalyzedNote[], recipeId: CustomDatabaseRecipeId | n
   for (const field of recipe?.schema ?? []) fields.set(field.key, { ...field, ...(field.options ? { options: [...field.options] } : {}) })
   const values = new Map<string, unknown[]>()
   for (const note of notes) for (const [rawKey, value] of Object.entries(note.frontmatter)) {
-    const key = normalizeSchemaKey(rawKey)
-    if (META_KEYS.has(key)) continue
+    let key: string
+    try { key = normalizeSchemaKey(rawKey) } catch { continue }
+    if (META_KEYS.has(key) || key.length > 64) continue
     values.set(key, [...(values.get(key) ?? []), value])
   }
   for (const [key, observed] of values) {

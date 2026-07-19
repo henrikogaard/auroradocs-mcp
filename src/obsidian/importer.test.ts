@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { cp, mkdtemp, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -89,6 +89,7 @@ test('bounded two-pass import resumes to completion without duplicate types, obj
   assert.equal(fake.objects.size, plan.entries.length + plan.containers.length)
   assert.equal(fake.content.size, plan.entries.length)
   assert.equal(fake.attachments.size, analysis.attachments.length)
+  assert.match(JSON.stringify([...fake.content.values()]), /\/attachments\/1/)
   assert.ok(fake.properties.some((property) => property.key === 'tags'))
 
   const writesBefore = fake.writes()
@@ -252,4 +253,41 @@ test('unsupported skip policy reaches the importer and omits dynamic plugin cont
   assert.equal(result.status, 'complete')
   const entry = plan.entries.find((candidate) => candidate.relativePath === 'Dynamic.md')!
   assert.doesNotMatch(JSON.stringify(fake.content.get(entry.objectId)), /LIST FROM|#travel/)
+})
+
+test('identical attachment bytes at different paths retain distinct journal and upload identities', async () => {
+  const { vault, vaultRoot, stateDir } = await copiedVault()
+  const original = await readFile(path.join(vaultRoot, 'Assets/manual.pdf'))
+  await writeFile(path.join(vaultRoot, 'Assets/manual-copy.pdf'), original)
+  await writeFile(path.join(vaultRoot, 'Home.md'), `${await readFile(path.join(vaultRoot, 'Home.md'), 'utf8')}\n![[Assets/manual-copy.pdf]]\n`)
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'flatten', attachmentPolicy: 'referenced',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const fake = fakeDependencies()
+  const result = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(result.status, 'complete')
+  assert.equal(analysis.attachments.length, 2)
+  assert.equal(fake.attachments.size, 2)
+})
+
+test('attachment bytes changed after inventory validation are never uploaded', async () => {
+  const { vault, stateDir } = await copiedVault()
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'flatten', attachmentPolicy: 'referenced',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const originalReadAsset = vault.readAsset.bind(vault)
+  let reads = 0
+  vault.readAsset = async (...args) => {
+    reads += 1
+    const bytes = await originalReadAsset(...args)
+    return reads > analysis.attachments.length ? Buffer.concat([bytes, Buffer.from('changed')]) : bytes
+  }
+  const fake = fakeDependencies()
+  const result = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(result.status, 'partial')
+  assert.equal(fake.attachments.size, 0)
 })
