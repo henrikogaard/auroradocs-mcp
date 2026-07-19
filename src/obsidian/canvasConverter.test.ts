@@ -33,3 +33,20 @@ test('unsupported and unresolved Canvas nodes remain readable and produce warnin
   assert.match(JSON.stringify(result.content), /Assets\/missing\.pdf|custom-plugin/)
   assert.ok(result.warnings.length >= 2)
 })
+
+test('unsupported skip policy omits unsupported and unresolved Canvas nodes', () => {
+  const context = { objectIdsByPath: new Map(), attachmentsByPath: new Map(), unsupportedPolicy: 'skip' as const }
+  const result = convertObsidianCanvas({
+    relativePath: 'Map.canvas', title: 'Map', sourceHash: 'hash', warnings: [], referencedPaths: [],
+    nodes: [
+      { id: 'missing', type: 'file', file: 'Assets/missing.pdf' },
+      { id: 'plugin', type: 'custom-plugin', data: 'skip me' },
+      { id: 'text', type: 'text', text: 'Keep me' },
+    ], edges: [{ id: 'skipped-edge', fromNode: 'plugin', toNode: 'text' }],
+  }, context)
+  const serialized = JSON.stringify(result.content)
+  assert.match(serialized, /Keep me/)
+  assert.doesNotMatch(serialized, /missing\.pdf|custom-plugin/)
+  assert.equal(result.content.edges.length, 0)
+  assert.ok(result.warnings.some((warning) => /skipped/i.test(warning)))
+})

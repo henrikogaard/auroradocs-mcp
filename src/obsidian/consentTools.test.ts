@@ -116,7 +116,7 @@ test('final Obsidian tools advertise exact closed-world additive annotations', (
   assert.deepEqual(importer.annotations, {
     readOnlyHint: false,
     destructiveHint: false,
-    idempotentHint: true,
+    idempotentHint: false,
     openWorldHint: false,
   })
   assert.deepEqual(status.annotations, {

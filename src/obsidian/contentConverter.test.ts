@@ -63,3 +63,23 @@ test('resolved attachment embeds become attachment references and unresolved emb
   assert.match(json, /Assets\/missing\.png/)
   assert.ok(result.warnings.some((warning) => /unresolved attachment/i.test(warning)))
 })
+
+test('Markdown image titles are excluded from attachment path lookup', () => {
+  const result = convertObsidianMarkdown('![Manual](Assets/manual.pdf "Equipment guide")', {
+    sourcePath: 'Home.md', objectIdsByPath: new Map(), resolvedLinks: [],
+    attachmentsByPath: new Map([['Assets/manual.pdf', { attachmentId: 'attachment-title', url: '/api/attachments/title' }]]),
+  })
+  assert.match(JSON.stringify(result.document), /attachment-title/)
+  assert.deepEqual(result.referencedAttachmentIds, ['attachment-title'])
+})
+
+test('unsupported skip policy omits dynamic plugin blocks and unresolved fallbacks', () => {
+  const context = {
+    sourcePath: 'Home.md', objectIdsByPath: new Map<string, string>(), resolvedLinks: [],
+    attachmentsByPath: new Map(), unsupportedPolicy: 'skip' as const,
+  }
+  const result = convertObsidianMarkdown('```dataview\nLIST FROM #travel\n```\n\n[[Missing note]]', context)
+  const serialized = JSON.stringify(result.document)
+  assert.doesNotMatch(serialized, /LIST FROM|Missing note/)
+  assert.ok(result.warnings.some((warning) => /skipped/i.test(warning)))
+})

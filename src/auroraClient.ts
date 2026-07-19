@@ -438,8 +438,12 @@ export async function updateAuroraObjectType(
 }
 
 export async function listAuroraTemplates(workspaceId: string, type?: string): Promise<AuroraObjectRecord[]> {
-  const page = await listObjectsPage(workspaceId, type, 1, 50)
-  return page.items.filter((object) => object.is_template && !object.is_deleted).slice(0, 50)
+  const client = getAuroraClient()
+  const filter = type
+    ? client.filter('workspace_id = {:wid} && is_deleted = false && is_template = true && type = {:type}', { wid: workspaceId, type })
+    : client.filter('workspace_id = {:wid} && is_deleted = false && is_template = true', { wid: workspaceId })
+  const page = await client.collection('objects').listPage({ filter, sort: '-updated_at', page: 1, perPage: 50 })
+  return page.items.map(mapObject)
 }
 
 function propertyValueField(valueType: PropertyValueType): keyof Pick<AuroraPropertyRecord, 'value_text' | 'value_num' | 'value_date' | 'value_bool' | 'value_ref'> {
@@ -818,19 +822,22 @@ export async function listProperties(objectIds: string[], workspaceId: string): 
     batch.forEach((id, idx) => { params[`id${idx}`] = id })
     const filter = client.filter(conditions.join(' || '), params)
 
-    const records = await client.collection('object_properties').listPage({ filter, page: 1, perPage: 50 })
-    for (const r of records.items) {
-      results.push({
-        id: r['id'] as string,
-        object_id: r['object_id'] as string,
-        key: r['key'] as string,
-        value_type: r['value_type'] as string,
-        value_text: (r['value_text'] as string | null) ?? null,
-        value_num: (r['value_num'] as number | null) ?? null,
-        value_date: (r['value_date'] as string | null) ?? null,
-        value_bool: r['value_bool'] != null ? Boolean(r['value_bool']) : null,
-        value_ref: (r['value_ref'] as string | null) ?? null,
-      })
+    for (let page = 1; page <= 10; page += 1) {
+      const records = await client.collection('object_properties').listPage({ filter, page, perPage: 50 })
+      for (const r of records.items) {
+        results.push({
+          id: r['id'] as string,
+          object_id: r['object_id'] as string,
+          key: r['key'] as string,
+          value_type: r['value_type'] as string,
+          value_text: (r['value_text'] as string | null) ?? null,
+          value_num: (r['value_num'] as number | null) ?? null,
+          value_date: (r['value_date'] as string | null) ?? null,
+          value_bool: r['value_bool'] != null ? Boolean(r['value_bool']) : null,
+          value_ref: (r['value_ref'] as string | null) ?? null,
+        })
+      }
+      if (!records.totalPages || page >= records.totalPages) break
     }
   }
   return results
@@ -1064,8 +1071,8 @@ function mapObject(r: Record<string, unknown>): AuroraObjectRecord {
     workspace_id: r['workspace_id'] as string,
     type: r['type'] as string,
     title: (r['title'] as string | null) ?? null,
-    icon: (r['icon'] as string | null) ?? null,
-    parent_id: (r['parent_id'] as string | null) ?? null,
+    icon: typeof r['icon'] === 'string' && r['icon'] ? r['icon'] : null,
+    parent_id: typeof r['parent_id'] === 'string' && r['parent_id'] ? r['parent_id'] : null,
     is_deleted: Boolean(r['is_deleted']),
     is_template: Boolean(r['is_template']),
     created_at: r['created_at'] as string,

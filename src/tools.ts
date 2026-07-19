@@ -66,11 +66,14 @@ import { resolveObsidianConfig } from './obsidian/config.js'
 import { openAuthorizedVault } from './obsidian/vaultAccess.js'
 import { analyzeObsidianVault } from './obsidian/analyzer.js'
 import {
+  assertCurrentObsidianImportPlan,
   buildObsidianImportPlan,
   getObsidianImportPlanPage,
   getStoredObsidianImportPlan,
+  readObsidianImportPlan,
   storeObsidianImportPlan,
   summarizeObsidianImportPlan,
+  writeObsidianImportPlan,
 } from './obsidian/importPlan.js'
 import type { ObsidianGroupAdjustment, ObsidianImportPlanPreview } from './obsidian/importPlan.js'
 import {
@@ -167,6 +170,25 @@ function notFound(message: string): ToolErrorResult {
 }
 
 const CUSTOM_DATABASE_PLANS = new Map<string, CustomDatabasePlan>()
+
+async function loadStoredObsidianImportPlan(
+  workspaceId: string,
+  planId: string,
+): Promise<StoredObsidianImportPlan | null> {
+  const memory = getStoredObsidianImportPlan(workspaceId, planId)
+  if (memory) return memory
+  let config
+  try { config = resolveObsidianConfig() } catch (error) {
+    throw new ToolInputError(error instanceof Error ? error.message : 'Obsidian vault authorization is unavailable')
+  }
+  const plan = await readObsidianImportPlan(config.stateDir, planId)
+  if (!plan || plan.workspaceId !== workspaceId) return null
+  const vault = await openAuthorizedVault(config)
+  const analysis = await analyzeObsidianVault(vault)
+  assertCurrentObsidianImportPlan(plan, analysis, workspaceId, new Date(plan.createdAt))
+  storeObsidianImportPlan(plan, analysis)
+  return { plan, analysis }
+}
 
 function cloneRecipe(recipe: CustomDatabaseRecipe): CustomDatabaseRecipe {
   return {
@@ -600,13 +622,14 @@ async function executeToolCallUnsafe(
           adjustments: parseObsidianAdjustments(input['adjustments']),
         })
         storeObsidianImportPlan(plan, analysis)
+        await writeObsidianImportPlan(config.stateDir, plan)
         return { type: 'obsidian_import_plan', plan: summarizeObsidianImportPlan(plan) }
       }
 
       case 'get_obsidian_import_plan': {
         const planId = readString(input['plan_id'])
         if (!planId) return invalidInput('Plan ID is required')
-        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        const stored = await loadStoredObsidianImportPlan(workspaceId, planId)
         if (!stored) return notFound('Obsidian import plan was not found for this workspace')
         if (Date.now() >= Date.parse(stored.plan.expiresAt)) return invalidInput('Obsidian import plan has expired; analyze the vault again')
         const section = readString(input['section']) ?? 'groups'
@@ -625,7 +648,7 @@ async function executeToolCallUnsafe(
         if (input['confirmed'] !== undefined && typeof input['confirmed'] !== 'boolean') return invalidInput('confirmed must be a boolean')
         const batchSize = readBoundedInteger(input, 'batch_size', { defaultValue: 50, min: 1, max: 100 })
         if (!batchSize.ok) return invalidInput(batchSize.message)
-        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        const stored = await loadStoredObsidianImportPlan(workspaceId, planId)
         if (!stored || stored.plan.planHash !== planHash) return invalidInput('The Obsidian import plan is missing or does not match the approved hash')
         const now = options.now?.() ?? new Date()
         if (now.getTime() >= Date.parse(stored.plan.expiresAt)) return invalidInput('Obsidian import plan has expired; analyze the vault again')
@@ -668,7 +691,7 @@ async function executeToolCallUnsafe(
       case 'get_obsidian_import_status': {
         const planId = readString(input['plan_id'])
         if (!planId) return invalidInput('Plan ID is required')
-        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        const stored = await loadStoredObsidianImportPlan(workspaceId, planId)
         if (!stored) return notFound('Obsidian import plan was not found for this workspace')
         let config
         try { config = resolveObsidianConfig() } catch (error) {

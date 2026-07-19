@@ -90,19 +90,22 @@ expired plan is a write-free result.
 - Markdown headings, paragraphs, emphasis, code, links, lists, task lists,
   quotes, fenced code, and tables map to AuroraDocs structured content.
 - Wiki links, aliases, headings, and block references resolve against the
-  analyzed vault. Ambiguous, broken, or unsupported links remain readable text
-  with warnings rather than silently targeting the wrong object.
+  analyzed vault. Under `preserve`, ambiguous, broken, or unsupported links
+  remain readable text with warnings; under `skip`, their unresolved fallback
+  content is omitted and reported instead of silently targeting an object.
 - Referenced attachments are hashed, deduplicated, uploaded only after their
   parent object exists, and reused by stable idempotency key.
 - JSON Canvas text, file, web, and group nodes plus edges are mapped; duplicate
-  IDs are remapped and unresolved or unsupported nodes remain readable warnings.
+  IDs are remapped. Unresolved or unsupported nodes remain readable under
+  `preserve` and are omitted with warnings under `skip`.
 - Folders can become spaces or parent pages. Object types are created or reused
   under the approved collision policy. Objects are created before links and
   content so cross-note references can resolve in a second pass.
 
 Conversion is intentionally conservative. Obsidian plugins, Dataview queries,
 scripts, CSS, theme behavior, transclusion edge cases, and plugin-specific
-metadata may be preserved only as readable text or warnings. Always compare a
+metadata are preserved only as readable text/warnings or omitted by the
+approved `skip` policy. Always compare a
 sample of complex notes and canvases in the test workspace.
 
 ## Batches, status, and recovery
@@ -113,16 +116,28 @@ counts, bounded warning codes, cursor, and next action. Repeat
 `import_obsidian_vault` with the same current plan ID/hash until status is
 complete or blocked.
 
-The private journal uses a 0700 directory, 0600 files, and atomic replacement.
-It contains hashes, Aurora destination IDs, cursor/status, bounded warning and
+Each call intentionally advances the cursor and is therefore non-idempotent at
+the MCP protocol boundary. The destination operations inside a batch use stable
+planned IDs and attachment idempotency keys, so a lost response can be retried
+without creating duplicate destination records.
+
+The private state directory uses mode 0700 and its plan/journal files use mode
+0600 with atomic replacement. Persisted plan metadata contains workspace-bound
+hashes, policies, inferred schemas, planned IDs, warnings, and relative source
+paths needed to revalidate the vault after restart. It never contains note
+bodies, frontmatter values, attachment bytes, tokens, credentials, or absolute
+paths. The separate progress journal contains hashes, Aurora destination IDs,
+cursor/status, bounded warning and
 error codes, package/format versions, and timestamps. It never stores note
 bodies, frontmatter values, attachment bytes, tokens, credentials, or absolute
 paths.
 
-Successful writes are not deleted if a later operation fails. Planned object
-IDs and idempotency keys make retries safe after an interrupted response. A
-server restart invalidates the in-memory plan; analyze again and obtain new
-consent. If the source inventory changed, the old plan is stale and cannot be
+Successful writes are not deleted if a later operation fails. Failed custom
+types, parent containers, or attachments keep dependent entries retryable
+instead of silently downgrading, flattening, or declaring completion. A server
+restart reloads the approved plan metadata, re-analyzes the authorized vault,
+and resumes only when workspace, root, inventory, plan hash, and expiry still
+match. If the source inventory changed, the old plan is stale and cannot be
 silently resumed.
 
 ## Preflight failures

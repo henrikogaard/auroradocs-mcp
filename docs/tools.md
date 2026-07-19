@@ -65,8 +65,8 @@ including object lookup and startup membership verification.
 | `create_template` | Create a reusable template with validated defaults and optional content. | `read:objects`, `write:objects`; add `write:content` for body content |
 | `create_from_template` | Create an object and copy approved template content/defaults. | `read:objects`, `write:objects`, `write:content` |
 | `analyze_obsidian_vault` | Read only the configured vault and create a reviewable import plan; no AuroraCloud writes. | `read:objects` plus local vault-root authorization |
-| `get_obsidian_import_plan` | Read one bounded plan section without rescanning or writing. | `read:objects` plus local vault-root authorization |
-| `import_obsidian_vault` | After explicit acceptance, import one additive, idempotent batch and never modify the source. | `read:objects`, `write:objects`, `write:content` plus local vault-root authorization |
+| `get_obsidian_import_plan` | Read one bounded plan section; after restart, revalidate the authorized vault against private persisted plan metadata without writing. | `read:objects` plus local vault-root authorization |
+| `import_obsidian_vault` | After explicit acceptance, advance one additive batch and never modify the source. Destination writes use stable IDs, but the batch-advancing tool call is non-idempotent. | `read:objects`, `write:objects`, `write:content` plus local vault-root authorization |
 | `get_obsidian_import_status` | Read content-free journal progress, warning codes, and the next action. | `read:objects` plus local vault-root authorization |
 | `list_week_plan` | Read the Monday-start planning week and optional unscheduled tasks. | `read:objects`, `read:tasks` |
 | `read_canvas` | Read Canvas cards, edges, references, frames, and warnings. | `read:objects`, `read:content` |

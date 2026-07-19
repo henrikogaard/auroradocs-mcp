@@ -20,7 +20,7 @@ function fallbackId(seed: string): string { return `canvas_${createHash('sha256'
 
 export function convertObsidianCanvas(
   canvas: AnalyzedCanvas,
-  context: { objectIdsByPath: Map<string, string>; attachmentsByPath: Map<string, AttachmentDestination> },
+  context: { objectIdsByPath: Map<string, string>; attachmentsByPath: Map<string, AttachmentDestination>; unsupportedPolicy?: 'preserve' | 'skip' },
 ): { content: { type: 'canvas'; version: 1; cards: CanvasCard[]; edges: CanvasEdge[]; frames: CanvasFrame[] }; warnings: string[] } {
   const warnings = [...canvas.warnings]
   const cards: CanvasCard[] = []
@@ -52,12 +52,22 @@ export function convertObsidianCanvas(
         ? file : file ? safeVaultReference(canvas.relativePath, file) : null
       const objectId = resolved ? context.objectIdsByPath.get(resolved) ?? null : null
       const attachment = resolved ? context.attachmentsByPath.get(resolved) : undefined
+      if (!objectId && !attachment && context.unsupportedPolicy === 'skip') {
+        warnings.push(`Unresolved Canvas file node ${file ?? id} was skipped.`)
+        if (firstMappedId.get(originalId) === id) firstMappedId.delete(originalId)
+        continue
+      }
       if (!objectId && !attachment) warnings.push(`Unresolved Canvas file node ${file ?? id} was preserved as text.`)
       cards.push({
         ...common, type: objectId ? 'object' : attachment ? 'attachment' : 'text',
         text: objectId || attachment ? null : file ?? `Unsupported file node ${id}`,
         objectId, attachmentId: attachment?.attachmentId ?? null, url: attachment?.url ?? null,
       })
+      continue
+    }
+    if (context.unsupportedPolicy === 'skip') {
+      warnings.push(`Unsupported Canvas node type ${type} was skipped.`)
+      if (firstMappedId.get(originalId) === id) firstMappedId.delete(originalId)
       continue
     }
     warnings.push(`Unsupported Canvas node type ${type} was preserved as readable text.`)
@@ -70,7 +80,10 @@ export function convertObsidianCanvas(
     const toOriginal = safeId(edge['toNode'] ?? edge['toCard'], '')
     const fromCard = firstMappedId.get(fromOriginal) ?? null
     const toCard = firstMappedId.get(toOriginal) ?? null
-    if (!fromCard || !toCard) warnings.push(`Canvas edge ${string(edge['id']) ?? index + 1} has an unresolved endpoint.`)
+    if (!fromCard || !toCard) {
+      warnings.push(`Canvas edge ${string(edge['id']) ?? index + 1} has an unresolved endpoint${context.unsupportedPolicy === 'skip' ? ' and was skipped' : ''}.`)
+      if (context.unsupportedPolicy === 'skip') continue
+    }
     edges.push({
       id: safeId(edge['id'], fallbackId(`${canvas.relativePath}:edge:${index}`)), fromCard, toCard,
       fromSide: string(edge['fromSide']), toSide: string(edge['toSide']), label: string(edge['label']),

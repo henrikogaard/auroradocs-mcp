@@ -59,6 +59,11 @@ test('additive updates preserve value types, requiredness, storage, relations, a
   assert.throws(() => validateAdditiveObjectTypePatch(current, [
     { key: 'status', label: 'Status', value_type: 'select', required: true, options: ['Active'], sensitive: true },
   ]), /required/i)
+  assert.throws(() => validateAdditiveObjectTypePatch([
+    { key: 'serial', label: 'Serial', value_type: 'text', required: true },
+  ], [
+    { key: 'serial', label: 'Serial', value_type: 'text', required: false },
+  ]), /required/i)
   assert.throws(() => validateAdditiveObjectTypePatch(current, [
     { key: 'status', label: 'Status', value_type: 'select', required: false, options: ['Archived'], sensitive: true },
   ]), /remove select option/i)

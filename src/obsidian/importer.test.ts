@@ -141,7 +141,115 @@ test('lost object-create responses are retried with the same planned ID and do n
 
   const first = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 1, dependencies: fake.dependencies })
   assert.equal(first.status, 'partial')
-  const second = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 1, dependencies: fake.dependencies })
-  assert.ok(second.status === 'in_progress' || second.status === 'complete')
+  for (let attempt = 0; attempt <= plan.entries.length && !fake.content.has(firstEntryId); attempt += 1) {
+    await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 1, dependencies: fake.dependencies })
+  }
+  assert.equal(fake.content.has(firstEntryId), true)
   assert.equal([...fake.objects.values()].filter((object) => object.id === firstEntryId).length, 1)
+})
+
+test('entries stay blocked when their approved custom type prerequisite fails', async () => {
+  const { vault, stateDir } = await copiedVault()
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'flatten', attachmentPolicy: 'skip',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const customEntry = plan.entries.find((entry) => entry.mapping === 'custom')!
+  const fake = fakeDependencies()
+  fake.dependencies.createObjectType = async () => { throw new Error('type unavailable') }
+
+  const result = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(result.status, 'partial')
+  assert.equal(fake.objects.has(customEntry.objectId), false)
+})
+
+test('entries are not flattened when their planned parent container fails', async () => {
+  const { vault, stateDir } = await copiedVault()
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'parents', attachmentPolicy: 'skip',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const failedContainer = plan.containers.find((container) => container.folder === 'People')!
+  const childEntry = plan.entries.find((entry) => entry.relativePath.startsWith('People/'))!
+  const fake = fakeDependencies()
+  const createObject = fake.dependencies.createObject
+  fake.dependencies.createObject = async (workspaceId, input) => {
+    if (input.id === failedContainer.objectId) throw new Error('container unavailable')
+    return createObject(workspaceId, input)
+  }
+
+  const result = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(result.status, 'partial')
+  assert.equal(fake.objects.has(childEntry.objectId), false)
+})
+
+test('batch cursor advances past an early failed entry to later vault entries', async () => {
+  const { vault, stateDir } = await copiedVault()
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'flatten', attachmentPolicy: 'skip',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const [firstEntry, secondEntry] = plan.entries
+  const fake = fakeDependencies()
+  const createObject = fake.dependencies.createObject
+  fake.dependencies.createObject = async (workspaceId, input) => {
+    if (input.id === firstEntry!.objectId) throw new Error('permanent first-entry failure')
+    return createObject(workspaceId, input)
+  }
+
+  await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 1, dependencies: fake.dependencies })
+  await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 1, dependencies: fake.dependencies })
+  assert.equal(fake.objects.has(secondEntry!.objectId), true)
+})
+
+test('failed attachment writes keep an otherwise completed batch partial', async () => {
+  const { vault, stateDir } = await copiedVault()
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'flatten', attachmentPolicy: 'referenced',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const fake = fakeDependencies()
+  fake.dependencies.uploadAttachment = async () => { throw new Error('upload unavailable') }
+
+  const result = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(result.status, 'partial')
+  assert.ok(result.failed >= 1)
+  assert.ok(result.remaining >= 1)
+})
+
+test('quota preflight counts only attachments that have not already uploaded', async () => {
+  const { vault, stateDir } = await copiedVault()
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'flatten', attachmentPolicy: 'referenced',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const capability = capabilities()
+  const fake = fakeDependencies(capability)
+  const first = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(first.status, 'complete')
+  capability.upload.remainingBytes = 0
+
+  const resumed = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(resumed.status, 'complete')
+  assert.equal(resumed.warnings.some((warning) => warning.code === 'attachment_quota_exceeded'), false)
+})
+
+test('unsupported skip policy reaches the importer and omits dynamic plugin content', async () => {
+  const { vault, vaultRoot, stateDir } = await copiedVault()
+  await writeFile(path.join(vaultRoot, 'Dynamic.md'), '```dataview\nLIST FROM #travel\n```\n')
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'flatten', attachmentPolicy: 'skip', unsupportedPolicy: 'skip',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const fake = fakeDependencies()
+  const result = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(result.status, 'complete')
+  const entry = plan.entries.find((candidate) => candidate.relativePath === 'Dynamic.md')!
+  assert.doesNotMatch(JSON.stringify(fake.content.get(entry.objectId)), /LIST FROM|#travel/)
 })

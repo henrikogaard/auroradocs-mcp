@@ -91,11 +91,15 @@ quota, and storage availability. E2EE plaintext import fails closed. Attachment
 uploads use one parent-bound MCP route and stable idempotency keys; the MCP
 cannot list, replace, or delete arbitrary files through that boundary.
 
-The resume journal lives outside the vault in a 0700 directory with 0600 files
-and atomic replacement. It stores hashes, destination IDs, cursor/status,
-bounded codes, and timestamps—not bodies, frontmatter values, bytes, tokens,
-credentials, or absolute paths. Restarting invalidates the in-memory plan and
-requires a fresh analysis and acceptance. Review the MCP client's own prompt,
+The private state lives outside the vault in a 0700 directory with 0600 files
+and atomic replacement. The persisted approved plan stores bounded policies,
+inferred schemas, planned IDs, warnings, and relative source paths needed for
+restart revalidation, but no note bodies, frontmatter values, attachment bytes,
+tokens, credentials, or absolute paths. The separate resume journal stores
+hashes, destination IDs, cursor/status, bounded codes, and timestamps without
+source content. After restart the server re-analyzes the authorized vault and
+reloads the plan only when its workspace, root, inventory, hash, and expiry
+still match. Review the MCP client's own prompt,
 tool-result, and retention behavior because it is outside this package's
 control.
 

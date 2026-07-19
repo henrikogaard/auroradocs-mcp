@@ -69,7 +69,7 @@ source vault and choosing a test destination. It is not in the published
 | Variable | Value |
 | --- | --- |
 | `AURORA_OBSIDIAN_VAULT_ROOT` | Absolute path to the single vault authorized for read-only analysis |
-| `AURORA_MCP_STATE_DIR` | Optional absolute journal directory outside the vault; defaults to the current user's private `.auroradocs-mcp` directory |
+| `AURORA_MCP_STATE_DIR` | Optional absolute private plan/journal directory outside the vault; defaults to the current user's `.auroradocs-mcp` directory |
 
 The vault-root variable does not authorize AuroraDocs writes. The later import
 tool has a separate review and acceptance gate. Removing the variable disables

@@ -230,7 +230,7 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
 
 test('every tool declares output schema and accurate effect annotations', () => {
   const localTools = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'])
-  const nonIdempotentTools = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template'])
+  const nonIdempotentTools = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template', 'import_obsidian_vault'])
   const successResultTypes: Record<string, string[]> = {
     list_workspaces: ['workspaces'],
     search_objects: ['objects'],
