@@ -4,7 +4,14 @@ import type { AddressInfo } from 'node:net'
 import test from 'node:test'
 import { resetAuroraClientForTests } from './auroraClient.js'
 import type { AuroraConnectionContext } from './contracts.js'
-import { getResumeProjectPrompt, readAuroraResource } from './mcpSurfaces.js'
+import {
+  getAuroraPrompt,
+  getAuroraPromptDefinitions,
+  getCustomDatabaseDesignPrompt,
+  getObsidianImportPrompt,
+  getResumeProjectPrompt,
+  readAuroraResource,
+} from './mcpSurfaces.js'
 
 const context: AuroraConnectionContext = {
   kind: 'client',
@@ -108,6 +115,37 @@ test('resume_project prompt supports a query but requires exactly one project se
   ]) {
     assert.throws(() => getResumeProjectPrompt(args), /workspace_id|Exactly one/)
   }
+})
+
+test('custom database prompt teaches recipe-first additive plan and explicit apply behavior', () => {
+  const prompt = getCustomDatabaseDesignPrompt({ workspace_id: 'workspace-1', use_case: 'Dive equipment' })
+  const text = prompt.messages[0]?.content.type === 'text' ? prompt.messages[0].content.text : ''
+  assert.match(text, /list_object_types/)
+  assert.match(text, /get_custom_database_recipes/)
+  assert.match(text, /plan_custom_database/)
+  assert.match(text, /apply_custom_database_plan/)
+  assert.match(text, /additive/i)
+  assert.match(text, /explicit.*approval/i)
+  assert.match(text, /Dive equipment/)
+})
+
+test('Obsidian import prompt requires analyze, later acceptance, exact hash, and bounded resume', () => {
+  const prompt = getObsidianImportPrompt({ workspace_id: 'workspace-1' })
+  const text = prompt.messages[0]?.content.type === 'text' ? prompt.messages[0].content.text : ''
+  assert.match(text, /analyze_obsidian_vault/)
+  assert.match(text, /get_obsidian_import_plan/)
+  assert.match(text, /later user message/i)
+  assert.match(text, /exact plan ID and hash/i)
+  assert.match(text, /get_obsidian_import_status/)
+  assert.match(text, /source vault.*never modified/i)
+})
+
+test('prompt catalog and dispatcher expose all guided workflows', () => {
+  assert.deepEqual(getAuroraPromptDefinitions().map((prompt) => prompt.name), [
+    'resume_project', 'custom_database_design', 'obsidian_import',
+  ])
+  assert.equal(getAuroraPrompt('custom_database_design', { workspace_id: 'workspace-1' }).messages.length, 1)
+  assert.throws(() => getAuroraPrompt('missing', {}), /Unknown AuroraDocs prompt/)
 })
 
 test('project context resource delegates to the same strict normalized service contract', async () => {

@@ -73,6 +73,14 @@ import {
   summarizeObsidianImportPlan,
 } from './obsidian/importPlan.js'
 import type { ObsidianGroupAdjustment, ObsidianImportPlanPreview } from './obsidian/importPlan.js'
+import {
+  decideObsidianImportConsent,
+  type ObsidianConsentPreview,
+  type ObsidianConsentRequest,
+} from './obsidian/consent.js'
+import { runObsidianImportBatch, type ObsidianImportBatchResult } from './obsidian/importer.js'
+import { readImportJournal, summarizeImportJournal, type ObsidianImportStatus } from './obsidian/journal.js'
+import type { StoredObsidianImportPlan } from './obsidian/importPlan.js'
 import type {
   AuroraConnectionContext,
   Availability,
@@ -110,6 +118,9 @@ export type ToolResult =
   | { type: 'template_instantiated'; template_id: string; object_id: string }
   | { type: 'obsidian_import_plan'; plan: ObsidianImportPlanPreview }
   | { type: 'obsidian_import_plan_page'; page: ReturnType<typeof getObsidianImportPlanPage> }
+  | { type: 'obsidian_import_confirmation_required'; plan_id: string; plan_hash: string; preview: ObsidianConsentPreview }
+  | { type: 'obsidian_import_batch'; result: ObsidianImportBatchResult }
+  | { type: 'obsidian_import_status'; status: ObsidianImportStatus }
   | { type: 'week_plan'; plan: McpWeekPlan }
   | { type: 'canvas'; canvas: McpCanvasReadResult }
   | { type: 'scheduled_task_block'; id: string; title: string | null; due_date: string; mode: string }
@@ -125,6 +136,12 @@ export type McpToolCallResult = {
   content: [{ type: 'text'; text: string }]
   structuredContent: ToolResult
   isError: boolean
+}
+
+export type ToolExecutionOptions = {
+  requestObsidianImportConsent?: ObsidianConsentRequest
+  runObsidianImport?: (stored: StoredObsidianImportPlan, batchSize: number) => Promise<ObsidianImportBatchResult>
+  now?: () => Date
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -416,14 +433,15 @@ export async function executeToolCall(
   name: string,
   input: Record<string, unknown>,
   connection: AuroraConnectionContext | string,
+  options: ToolExecutionOptions = {},
 ): Promise<ToolResult> {
   try {
     const context = normalizeConnectionContext(connection)
     if (name === 'list_workspaces') return { type: 'workspaces', workspaces: context.workspaces }
     if (name === 'get_mcp_tool_coverage' || name === 'get_mcp_workflow_recipes' || name === 'get_custom_database_recipes') {
-      return await executeToolCallUnsafe(name, input, context.kind === 'legacy_workspace' ? context.defaultWorkspaceId : '')
+      return await executeToolCallUnsafe(name, input, context.kind === 'legacy_workspace' ? context.defaultWorkspaceId : '', options)
     }
-    return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input))
+    return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input), options)
   } catch (error) {
     return toSafeToolError(error)
   }
@@ -433,6 +451,7 @@ async function executeToolCallUnsafe(
   name: string,
   input: Record<string, unknown>,
   workspaceId: string,
+  options: ToolExecutionOptions,
 ): Promise<ToolResult> {
   switch (name) {
       // ── Read tools ─────────────────────────────────────────────────────
@@ -597,6 +616,67 @@ async function executeToolCallUnsafe(
         const perPage = readBoundedInteger(input, 'per_page', { defaultValue: 50, min: 1, max: 100 })
         if (!perPage.ok) return invalidInput(perPage.message)
         return { type: 'obsidian_import_plan_page', page: getObsidianImportPlanPage(stored.plan, section, page.value, perPage.value) }
+      }
+
+      case 'import_obsidian_vault': {
+        const planId = readString(input['plan_id'])
+        const planHash = readString(input['plan_hash'])
+        if (!planId || !planHash) return invalidInput('Plan ID and plan hash are required')
+        if (input['confirmed'] !== undefined && typeof input['confirmed'] !== 'boolean') return invalidInput('confirmed must be a boolean')
+        const batchSize = readBoundedInteger(input, 'batch_size', { defaultValue: 50, min: 1, max: 100 })
+        if (!batchSize.ok) return invalidInput(batchSize.message)
+        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        if (!stored || stored.plan.planHash !== planHash) return invalidInput('The Obsidian import plan is missing or does not match the approved hash')
+        const now = options.now?.() ?? new Date()
+        if (now.getTime() >= Date.parse(stored.plan.expiresAt)) return invalidInput('Obsidian import plan has expired; analyze the vault again')
+        const summary = summarizeObsidianImportPlan(stored.plan)
+        const preview: ObsidianConsentPreview = {
+          planId: summary.planId, planHash: summary.planHash,
+          vaultDisplayName: summary.vaultDisplayName, workspaceId: summary.workspaceId,
+          counts: {
+            notes: summary.counts.notes, templates: summary.counts.templates,
+            canvases: summary.counts.canvases, attachments: summary.counts.attachments,
+            customGroups: summary.counts.customGroups,
+          },
+          policies: summary.policies,
+          acceptedGroupCount: stored.plan.groups.filter((group) => group.decision === 'accept').length,
+        }
+        const consent = await decideObsidianImportConsent({
+          confirmed: input['confirmed'], preview,
+          requestConsent: options.requestObsidianImportConsent,
+        })
+        if (consent.outcome === 'confirmation_required') {
+          return { type: 'obsidian_import_confirmation_required', plan_id: planId, plan_hash: planHash, preview }
+        }
+        if (consent.outcome !== 'accepted') {
+          const message = consent.outcome === 'adjustment_required'
+            ? 'Import not started. Re-analyze with the requested policy or group changes, then review the new plan.'
+            : 'Obsidian import was not approved; no AuroraDocs writes were performed.'
+          return { type: 'no_op', message }
+        }
+        const run = options.runObsidianImport ?? (async (approved, size) => {
+          let config
+          try { config = resolveObsidianConfig() } catch (error) {
+            throw new ToolInputError(error instanceof Error ? error.message : 'Obsidian vault authorization is unavailable')
+          }
+          const vault = await openAuthorizedVault(config)
+          return runObsidianImportBatch(approved, vault, config.stateDir, { batchSize: size })
+        })
+        return { type: 'obsidian_import_batch', result: await run(stored, batchSize.value) }
+      }
+
+      case 'get_obsidian_import_status': {
+        const planId = readString(input['plan_id'])
+        if (!planId) return invalidInput('Plan ID is required')
+        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        if (!stored) return notFound('Obsidian import plan was not found for this workspace')
+        let config
+        try { config = resolveObsidianConfig() } catch (error) {
+          throw new ToolInputError(error instanceof Error ? error.message : 'Obsidian vault authorization is unavailable')
+        }
+        const journal = await readImportJournal(config.stateDir, planId)
+        if (journal && journal.workspaceId !== workspaceId) return notFound('Obsidian import status was not found for this workspace')
+        return { type: 'obsidian_import_status', status: summarizeImportJournal(stored.plan, journal) }
       }
 
       case 'list_object_types': {
@@ -1170,6 +1250,26 @@ export function formatToolResult(result: ToolResult): string {
       ].join('\n')
     case 'obsidian_import_plan_page':
       return JSON.stringify(result.page, null, 2)
+    case 'obsidian_import_confirmation_required':
+      return [
+        `Confirmation required for Obsidian plan ${result.plan_id} (${result.plan_hash}).`,
+        `Vault: ${result.preview.vaultDisplayName}; workspace: ${result.preview.workspaceId}.`,
+        `Notes: ${result.preview.counts.notes}; templates: ${result.preview.counts.templates}; Canvas: ${result.preview.counts.canvases}; attachments: ${result.preview.counts.attachments}.`,
+        'Present this plan to the user and wait for a later user message. Then call import_obsidian_vault with the exact plan_id, plan_hash, and confirmed: true.',
+      ].join('\n')
+    case 'obsidian_import_batch':
+      return [
+        `Obsidian import ${result.result.status}: ${result.result.completed} complete, ${result.result.failed} failed, ${result.result.remaining} remaining.`,
+        `Plan: ${result.result.planId} (${result.result.planHash}).`,
+        result.result.nextCursor === null ? 'No next cursor.' : `Next cursor: ${result.result.nextCursor}.`,
+        result.result.warnings.length ? `Warnings: ${result.result.warnings.map((warning) => warning.code).join(', ')}` : 'Warnings: none.',
+      ].join('\n')
+    case 'obsidian_import_status':
+      return [
+        `Obsidian import ${result.status.status}: ${result.status.completed} complete, ${result.status.failed} failed, ${result.status.remaining} remaining.`,
+        `Plan: ${result.status.planId} (${result.status.planHash}).`,
+        result.status.nextAction,
+      ].join('\n')
     case 'week_plan':
       return [
         `Week ${result.plan.range.start} to ${result.plan.range.end}`,

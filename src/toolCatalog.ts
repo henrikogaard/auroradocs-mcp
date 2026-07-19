@@ -92,6 +92,8 @@ const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
   create_from_template: 'write',
   analyze_obsidian_vault: 'read',
   get_obsidian_import_plan: 'read',
+  import_obsidian_vault: 'write',
+  get_obsidian_import_status: 'read',
   create_object: 'write',
   create_task: 'write',
   update_task: 'write',
@@ -374,6 +376,81 @@ const TEMPLATE_SUMMARY_SCHEMA: JsonObjectSchema = {
   additionalProperties: false,
 }
 
+const OBSIDIAN_CONSENT_PREVIEW_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    planId: stringSchema,
+    planHash: stringSchema,
+    vaultDisplayName: stringSchema,
+    workspaceId: stringSchema,
+    counts: {
+      type: 'object',
+      properties: {
+        notes: { type: 'integer' }, templates: { type: 'integer' }, canvases: { type: 'integer' },
+        attachments: { type: 'integer' }, customGroups: { type: 'integer' },
+      },
+      required: ['notes', 'templates', 'canvases', 'attachments', 'customGroups'],
+      additionalProperties: false,
+    },
+    policies: {
+      type: 'object',
+      properties: {
+        hierarchy: { type: 'string', enum: ['spaces', 'parents', 'flatten'] },
+        collisions: { type: 'string', enum: ['rename', 'skip', 'fail'] },
+        attachments: { type: 'string', enum: ['referenced', 'skip'] },
+        unsupported: { type: 'string', enum: ['preserve', 'skip'] },
+      },
+      required: ['hierarchy', 'collisions', 'attachments', 'unsupported'],
+      additionalProperties: false,
+    },
+    acceptedGroupCount: { type: 'integer' },
+  },
+  required: ['planId', 'planHash', 'vaultDisplayName', 'workspaceId', 'counts', 'policies', 'acceptedGroupCount'],
+  additionalProperties: false,
+}
+
+const OBSIDIAN_IMPORT_BATCH_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    status: { type: 'string', enum: ['blocked', 'in_progress', 'partial', 'complete'] },
+    planId: stringSchema,
+    planHash: stringSchema,
+    completed: { type: 'integer', minimum: 0 },
+    failed: { type: 'integer', minimum: 0 },
+    remaining: { type: 'integer', minimum: 0 },
+    nextCursor: { type: ['integer', 'null'] },
+    warnings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { code: stringSchema, entryId: stringSchema },
+        required: ['code'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['status', 'planId', 'planHash', 'completed', 'failed', 'remaining', 'nextCursor', 'warnings'],
+  additionalProperties: false,
+}
+
+const OBSIDIAN_IMPORT_STATUS_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    status: { type: 'string', enum: ['pending', 'in_progress', 'partial', 'complete', 'blocked'] },
+    planId: stringSchema,
+    planHash: stringSchema,
+    completed: { type: 'integer', minimum: 0 },
+    failed: { type: 'integer', minimum: 0 },
+    remaining: { type: 'integer', minimum: 0 },
+    nextCursor: { type: ['integer', 'null'] },
+    warningCodes: { type: 'array', items: stringSchema },
+    updatedAt: nullableStringSchema,
+    nextAction: stringSchema,
+  },
+  required: ['status', 'planId', 'planHash', 'completed', 'failed', 'remaining', 'nextCursor', 'warningCodes', 'updatedAt', 'nextAction'],
+  additionalProperties: false,
+}
+
 const CUSTOM_DATABASE_PLAN_SCHEMA: JsonObjectSchema = {
   type: 'object',
   properties: {
@@ -575,6 +652,20 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
   create_from_template: [resultSchema('template_instantiated', { template_id: stringSchema, object_id: stringSchema }, ['template_id', 'object_id'])],
   analyze_obsidian_vault: [resultSchema('obsidian_import_plan', { plan: { type: 'object', additionalProperties: true } }, ['plan'])],
   get_obsidian_import_plan: [resultSchema('obsidian_import_plan_page', { page: { type: 'object', additionalProperties: true } }, ['page'])],
+  import_obsidian_vault: [
+    resultSchema('obsidian_import_confirmation_required', {
+      plan_id: stringSchema,
+      plan_hash: stringSchema,
+      preview: OBSIDIAN_CONSENT_PREVIEW_SCHEMA,
+    }, ['plan_id', 'plan_hash', 'preview']),
+    resultSchema('obsidian_import_batch', {
+      result: OBSIDIAN_IMPORT_BATCH_SCHEMA,
+    }, ['result']),
+    resultSchema('no_op', { message: stringSchema }, ['message']),
+  ],
+  get_obsidian_import_status: [resultSchema('obsidian_import_status', {
+    status: OBSIDIAN_IMPORT_STATUS_SCHEMA,
+  }, ['status'])],
   get_project_context: [
     resultSchema('project_context', {
       status: { const: 'ok' },
@@ -639,7 +730,7 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
 }
 
 const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template'])
-const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan'])
+const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'])
 const WORKSPACE_SELECTOR_FREE_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
 
 type McpToolDeclaration = Omit<McpToolDefinition, 'title' | 'outputSchema' | 'annotations'>
@@ -991,6 +1082,31 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
     },
   },
   {
+    name: 'import_obsidian_vault',
+    description: 'After the user reviews an exact Obsidian plan, request explicit consent and import one additive, resumable batch. The source vault is never modified.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan_id: stringSchema,
+        plan_hash: stringSchema,
+        confirmed: { type: 'boolean', description: 'Compatibility confirmation for clients without MCP form elicitation; only set true after a later explicit user acceptance.' },
+        batch_size: { type: 'integer', minimum: 1, maximum: 100, description: 'Entries to process in this call (default 50, maximum 100).' },
+      },
+      required: ['plan_id', 'plan_hash'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_obsidian_import_status',
+    description: 'Read content-free progress and warning codes for an in-process Obsidian import plan.',
+    inputSchema: {
+      type: 'object',
+      properties: { plan_id: stringSchema },
+      required: ['plan_id'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'create_object',
     description: 'Create a new non-task object (page, note, bookmark, etc.) in the workspace. Use create_task for tasks.',
     inputSchema: {
@@ -1206,6 +1322,13 @@ export function getMcpToolCoverageAudit(): McpToolCoverageAudit {
         implementedTools: ['list_object_types', 'get_custom_database_recipes', 'plan_custom_database', 'apply_custom_database_plan', 'update_object_type', 'list_templates', 'create_template', 'create_from_template'],
         missingTools: [],
       },
+      {
+        id: 'obsidian_import',
+        label: 'Consent-gated local Obsidian analysis and import',
+        status: 'covered',
+        implementedTools: ['analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'],
+        missingTools: [],
+      },
     ],
   }
 }
@@ -1251,6 +1374,14 @@ export function getMcpWorkflowRecipes(): McpWorkflowRecipe[] {
       requiredScopes: ['read:objects', 'write:objects', 'write:content'],
       toolSteps: ['get_custom_database_recipes', 'list_object_types', 'plan_custom_database', 'apply_custom_database_plan', 'list_templates'],
       prompt: 'Start from the closest recipe, inspect existing object types, propose an additive plan, show its assumptions and exact hash, then apply it only after the user accepts that plan.',
+    },
+    {
+      id: 'obsidian_import',
+      title: 'Obsidian vault import',
+      goal: 'Analyze one locally authorized vault, review its mapping, obtain explicit later consent, and resume bounded additive import batches.',
+      requiredScopes: ['read:objects', 'write:objects', 'write:content'],
+      toolSteps: ['analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'],
+      prompt: 'Analyze first without writes, present the exact plan and wait for a later acceptance, then import bounded batches with the exact plan ID/hash until status is complete or blocked. Never modify the source vault.',
     },
   ]
 }

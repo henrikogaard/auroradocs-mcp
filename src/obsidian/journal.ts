@@ -32,6 +32,19 @@ export type ImportJournal = {
   updatedAt: string
 }
 
+export type ObsidianImportStatus = {
+  status: ImportJournal['status']
+  planId: string
+  planHash: string
+  completed: number
+  failed: number
+  remaining: number
+  nextCursor: number | null
+  warningCodes: string[]
+  updatedAt: string | null
+  nextAction: string
+}
+
 export function createImportJournal(
   input: Pick<ImportJournal, 'planId' | 'planHash' | 'workspaceId' | 'rootIdentityHash' | 'inventoryHash'>,
   now = new Date(),
@@ -121,4 +134,41 @@ export async function readImportJournal(stateDir: string, planId: string): Promi
   assertContentFree(value)
   if (value.planId !== planId) throw new Error('Import journal plan mismatch')
   return value
+}
+
+export function summarizeImportJournal(
+  plan: { planId: string; planHash: string; entries: unknown[] },
+  journal: ImportJournal | null,
+): ObsidianImportStatus {
+  if (!journal) {
+    return {
+      status: 'pending', planId: plan.planId, planHash: plan.planHash,
+      completed: 0, failed: 0, remaining: plan.entries.length, nextCursor: 0,
+      warningCodes: [], updatedAt: null,
+      nextAction: 'Confirm the exact plan ID and hash to import the first bounded batch.',
+    }
+  }
+  const entries = Object.values(journal.entries)
+  const completed = entries.filter((entry) => entry.status === 'complete').length
+  const failed = entries.filter((entry) => entry.status === 'failed').length
+  const warningCodes = new Set<string>()
+  for (const entry of entries) {
+    entry.warningCodes.forEach((code) => warningCodes.add(code))
+    if (entry.errorCode) warningCodes.add(entry.errorCode)
+  }
+  for (const collection of [journal.groups, journal.containers, journal.attachments]) {
+    for (const item of Object.values(collection)) if (item.errorCode) warningCodes.add(item.errorCode)
+  }
+  const remaining = Math.max(0, plan.entries.length - completed)
+  return {
+    status: journal.status, planId: plan.planId, planHash: plan.planHash,
+    completed, failed, remaining,
+    nextCursor: journal.status === 'complete' ? null : journal.cursor,
+    warningCodes: [...warningCodes].slice(0, 100), updatedAt: journal.updatedAt,
+    nextAction: journal.status === 'complete'
+      ? 'Import complete.'
+      : journal.status === 'blocked'
+        ? 'Resolve the reported safety block, re-analyze if needed, and confirm a current plan.'
+        : 'Call import_obsidian_vault again with the same plan ID and hash to resume.',
+  }
 }
