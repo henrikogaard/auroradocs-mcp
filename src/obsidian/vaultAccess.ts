@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises'
 import path from 'node:path'
 import type { ObsidianImportConfig } from './config.js'
@@ -66,6 +67,18 @@ export class AuthorizedVault {
     this.#root = root
     this.#identity = identity
     this.#maxEntries = maxEntries
+  }
+
+  get displayName(): string {
+    return path.basename(this.#identity.canonicalPath)
+  }
+
+  get identityHash(): string {
+    return createHash('sha256')
+      .update(this.#identity.canonicalPath)
+      .update(String(this.#identity.dev))
+      .update(String(this.#identity.ino))
+      .digest('hex')
   }
 
   async #assertRootIdentity(): Promise<void> {
