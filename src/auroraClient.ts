@@ -169,7 +169,7 @@ type BackendClient = {
   authStore: BackendAuthStore
   filter(template: string, params: Record<string, unknown>): string
   collection(name: string): BackendCollection
-  request<T = unknown>(path: string, options?: { method?: string; body?: unknown }): Promise<T>
+  request<T = unknown>(path: string, options?: { method?: string; body?: unknown; rawBody?: BodyInit; headers?: HeadersInit }): Promise<T>
 }
 
 // ── Singleton backend instance ───────────────────────────────────────────────
@@ -346,6 +346,25 @@ export async function createObject(
   return mapObject(r)
 }
 
+export async function createAuroraObjectStable(
+  workspaceId: string,
+  input: { id: string; type: string; title: string; icon?: string | null; parentId?: string | null; isTemplate?: boolean },
+): Promise<AuroraObjectRecord> {
+  const existing = await getObject(input.id, workspaceId)
+  if (existing) {
+    if (
+      existing.type !== input.type || existing.title !== input.title || existing.is_deleted
+      || existing.is_template !== (input.isTemplate ?? false)
+      || (input.icon !== undefined && existing.icon !== input.icon)
+      || (input.parentId !== undefined && existing.parent_id !== input.parentId)
+    ) throw new ToolInputError('Planned object ID already belongs to a different object')
+    return existing
+  }
+  return createObject(workspaceId, input.type, input.title, {
+    id: input.id, icon: input.icon, parentId: input.parentId, isTemplate: input.isTemplate,
+  })
+}
+
 // ── Custom object types and templates ───────────────────────────────────────
 
 function mapObjectType(record: Record<string, unknown>): ObjectTypeDef {
@@ -431,7 +450,7 @@ function propertyValueField(valueType: PropertyValueType): keyof Pick<AuroraProp
   return 'value_text'
 }
 
-async function upsertTypedProperty(
+export async function upsertAuroraPropertyStable(
   objectId: string,
   workspaceId: string,
   key: string,
@@ -499,7 +518,7 @@ export async function createAuroraTemplate(input: AuroraTemplateInput): Promise<
   if (!object.is_template) throw new Error('Template writer did not create a template object')
   if (input.body !== undefined) await setContent(object.id, input.workspaceId, plainTextDocument(input.body))
   for (const value of input.defaults ?? []) {
-    await upsertTypedProperty(object.id, input.workspaceId, value.key, value.valueType, value.value)
+    await upsertAuroraPropertyStable(object.id, input.workspaceId, value.key, value.valueType, value.value)
   }
   return object
 }
@@ -540,9 +559,74 @@ export async function createAuroraObjectFromTemplate(
     if (template.type.startsWith('custom:') && (!declared || declared.value_type !== property.value_type)) continue
     const valueType = property.value_type as PropertyValueType
     const value = propertyRecordValue(property)
-    if (value !== null) await upsertTypedProperty(created.id, workspaceId, property.key, valueType, value)
+    if (value !== null) await upsertAuroraPropertyStable(created.id, workspaceId, property.key, valueType, value)
   }
   return created.id
+}
+
+export async function setAuroraContentStable(
+  workspaceId: string,
+  objectId: string,
+  content: Record<string, unknown>,
+): Promise<void> {
+  await setContent(objectId, workspaceId, content)
+}
+
+export type AuroraImportCapabilities = {
+  workspaceId: string
+  role: string
+  scopes: string[]
+  e2ee: { enabled: boolean; importBlocked: boolean; reason: string | null }
+  upload: { maxBytes: number; mimePolicy: unknown; limitBytes: number; usedBytes: number; remainingBytes: number }
+  storage: { available: boolean; backend: string }
+}
+
+export async function getAuroraImportCapabilities(workspaceId: string): Promise<AuroraImportCapabilities> {
+  const response = await getAuroraClient().request<Partial<AuroraImportCapabilities>>(
+    `/api/mcp/workspaces/${encodeURIComponent(workspaceId)}/import-capabilities`,
+    { method: 'GET' },
+  )
+  if (
+    response.workspaceId !== workspaceId || typeof response.role !== 'string' || !Array.isArray(response.scopes)
+    || !response.scopes.every((scope) => typeof scope === 'string')
+    || !response.e2ee || typeof response.e2ee.importBlocked !== 'boolean'
+    || !response.upload || typeof response.upload.maxBytes !== 'number' || typeof response.upload.remainingBytes !== 'number'
+    || !response.storage || typeof response.storage.available !== 'boolean'
+  ) throw new Error('Invalid AuroraCloud import capability response')
+  return response as AuroraImportCapabilities
+}
+
+export type AuroraAttachmentUpload = {
+  id: string
+  workspaceId: string
+  objectId: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  url: string
+}
+
+export async function uploadAuroraMcpAttachment(input: {
+  workspaceId: string
+  objectId: string
+  fileName: string
+  mimeType: string
+  bytes: Buffer
+  idempotencyKey: string
+}): Promise<AuroraAttachmentUpload> {
+  const fileName = input.fileName.replace(/[\\/]/g, '_').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 240) || 'attachment.bin'
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array(input.bytes)], { type: input.mimeType || 'application/octet-stream' }), fileName)
+  const response = await getAuroraClient().request<Partial<AuroraAttachmentUpload>>(
+    `/api/mcp/workspaces/${encodeURIComponent(input.workspaceId)}/objects/${encodeURIComponent(input.objectId)}/attachments`,
+    { method: 'POST', rawBody: form, headers: { 'idempotency-key': input.idempotencyKey } },
+  )
+  if (
+    response.workspaceId !== input.workspaceId || response.objectId !== input.objectId
+    || typeof response.id !== 'string' || typeof response.fileName !== 'string'
+    || typeof response.mimeType !== 'string' || response.sizeBytes !== input.bytes.length || typeof response.url !== 'string'
+  ) throw new Error('Invalid AuroraCloud attachment upload response')
+  return response as AuroraAttachmentUpload
 }
 
 export async function updateObjectTitle(id: string, title: string, workspaceId: string): Promise<void> {
@@ -1160,16 +1244,17 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
       return `"${String(value ?? '').replaceAll('"', '\\"')}"`
     })
 
-  const request = async <T = unknown>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> => {
-    const headers = new Headers()
+  const request = async <T = unknown>(path: string, options: { method?: string; body?: unknown; rawBody?: BodyInit; headers?: HeadersInit } = {}): Promise<T> => {
+    const headers = new Headers(options.headers)
     if (authStore.token) headers.set('authorization', `Bearer ${authStore.token}`)
+    if (options.body !== undefined && options.rawBody !== undefined) throw new Error('Request cannot contain JSON and raw bodies together')
     if (options.body !== undefined) headers.set('content-type', 'application/json')
     let response: Response
     try {
       response = await fetch(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
         method: options.method ?? 'GET',
         headers,
-        body: options.body === undefined ? undefined : JSON.stringify(options.body),
+        body: options.rawBody ?? (options.body === undefined ? undefined : JSON.stringify(options.body)),
       })
     } catch (error) {
       throw new AuroraApiError(

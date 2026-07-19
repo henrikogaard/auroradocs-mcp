@@ -35,6 +35,13 @@ export type ObsidianImportEntry = {
   groupId: string | null
   objectId: string
 }
+export type ObsidianImportContainer = {
+  folder: string
+  title: string
+  parentFolder: string | null
+  objectId: string
+  type: 'space' | 'page'
+}
 export type ObsidianImportPlan = {
   version: typeof OBSIDIAN_IMPORT_PLAN_VERSION
   planId: string
@@ -48,9 +55,10 @@ export type ObsidianImportPlan = {
   attachmentPolicy: 'referenced' | 'skip'
   unsupportedPolicy: 'preserve' | 'skip'
   groups: ObsidianImportGroup[]
+  containers: ObsidianImportContainer[]
   entries: ObsidianImportEntry[]
   adjustments: ObsidianGroupAdjustment[]
-  counts: { notes: number; templates: number; canvases: number; attachments: number; customGroups: number; pages: number; warnings: number }
+  counts: { notes: number; templates: number; canvases: number; attachments: number; customGroups: number; containers: number; pages: number; warnings: number }
   warnings: string[]
   requiresConfirmation: true
   createdAt: string
@@ -101,7 +109,7 @@ function planBehavior(plan: Omit<ObsidianImportPlan, 'planHash'> | ObsidianImpor
     rootIdentityHash: plan.rootIdentityHash, inventoryHash: plan.inventoryHash,
     hierarchyPolicy: plan.hierarchyPolicy, collisionPolicy: plan.collisionPolicy,
     attachmentPolicy: plan.attachmentPolicy, unsupportedPolicy: plan.unsupportedPolicy,
-    groups: plan.groups, entries: plan.entries, adjustments: plan.adjustments,
+    groups: plan.groups, containers: plan.containers, entries: plan.entries, adjustments: plan.adjustments,
     requiresConfirmation: plan.requiresConfirmation, expiresAt: plan.expiresAt,
   }
 }
@@ -205,6 +213,19 @@ export function buildObsidianImportPlan(analysis: VaultAnalysis, workspaceId: st
       mapping: 'canvas' as const, groupId: null, objectId: newAuroraId(),
     })),
   ].sort((left, right) => left.relativePath.localeCompare(right.relativePath, 'en'))
+  const folders = [...new Set(analysis.notes.map((note) => note.folder).filter(Boolean))]
+  const allFolders = new Set<string>()
+  for (const folder of folders) {
+    const segments = folder.split('/')
+    for (let index = 1; index <= segments.length; index += 1) allFolders.add(segments.slice(0, index).join('/'))
+  }
+  const containers: ObsidianImportContainer[] = options.hierarchyPolicy === 'flatten' ? [] : [...allFolders].sort().map((folder) => ({
+    folder,
+    title: folder.split('/').at(-1) ?? folder,
+    parentFolder: folder.includes('/') ? folder.slice(0, folder.lastIndexOf('/')) : null,
+    objectId: newAuroraId(),
+    type: options.hierarchyPolicy === 'parents' ? 'page' : 'space',
+  }))
   const createdAt = options.now ?? new Date().toISOString()
   const createdMillis = Date.parse(createdAt)
   if (!Number.isFinite(createdMillis)) throw new Error('Plan creation time must be an ISO timestamp')
@@ -215,11 +236,12 @@ export function buildObsidianImportPlan(analysis: VaultAnalysis, workspaceId: st
     vaultDisplayName: analysis.vaultDisplayName, rootIdentityHash: analysis.rootIdentityHash, inventoryHash: analysis.inventoryHash,
     hierarchyPolicy: options.hierarchyPolicy ?? 'spaces', collisionPolicy: options.collisionPolicy ?? 'rename',
     attachmentPolicy: options.attachmentPolicy ?? 'referenced', unsupportedPolicy: options.unsupportedPolicy ?? 'preserve',
-    groups: adjusted.groups, entries, adjustments,
+    groups: adjusted.groups, containers, entries, adjustments,
     counts: {
       notes: analysis.notes.length, templates: entries.filter((entry) => entry.mapping === 'template').length,
       canvases: analysis.canvases.length, attachments: options.attachmentPolicy === 'skip' ? 0 : analysis.attachments.length,
       customGroups: adjusted.groups.filter((group) => group.decision === 'accept').length,
+      containers: containers.length,
       pages: entries.filter((entry) => entry.mapping === 'page').length, warnings: analysis.warnings.length,
     },
     warnings: analysis.warnings.slice(0, 100), requiresConfirmation: true, createdAt, expiresAt,
