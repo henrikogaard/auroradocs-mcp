@@ -1,6 +1,8 @@
 # Tools and scopes
 
-AuroraDocs MCP 0.2.0 exposes the tools below to a connected client. An
+The current AuroraDocs MCP source exposes the tools below to a connected client.
+The latest published package remains 0.2.0; custom-database and Obsidian tools
+are **Unreleased** until the next package release. An
 `aur_mcp_client_` credential can discover its independently granted workspaces
 with `list_workspaces`; every workspace data call then selects one grant with
 `workspace_id` or an unambiguous `workspace_alias`. A legacy `aur_mcp_` token
@@ -54,6 +56,18 @@ including object lookup and startup membership verification.
 | `list_task_statuses` | Return supported task status names. | `read:objects`, `read:tasks` |
 | `get_mcp_tool_coverage` | Describe implemented tool coverage and known gaps. | `read:objects` startup baseline |
 | `get_mcp_workflow_recipes` | Return built-in workflow recipes and their scopes. | `read:objects` startup baseline |
+| `list_object_types` | List custom object types and bounded schemas. | `read:objects` |
+| `get_custom_database_recipes` | Return starter recipes for contacts, interests, equipment, subscriptions, and expenses. | `read:objects` startup baseline |
+| `plan_custom_database` | Build a write-free, expiring, exact-hash plan for a recipe or arbitrary schema. | `read:objects` |
+| `apply_custom_database_plan` | Apply the exact approved additive plan, reusing an exact type when possible. | `read:objects`, `write:objects`; add `write:content` when creating template content |
+| `update_object_type` | Apply a validated additive object-type update. | `read:objects`, `write:objects` |
+| `list_templates` | List reusable templates, optionally by object type. | `read:objects` |
+| `create_template` | Create a reusable template with validated defaults and optional content. | `read:objects`, `write:objects`; add `write:content` for body content |
+| `create_from_template` | Create an object and copy approved template content/defaults. | `read:objects`, `write:objects`, `write:content` |
+| `analyze_obsidian_vault` | Read only the configured vault and create a reviewable import plan; no AuroraCloud writes. | `read:objects` plus local vault-root authorization |
+| `get_obsidian_import_plan` | Read one bounded plan section without rescanning or writing. | `read:objects` plus local vault-root authorization |
+| `import_obsidian_vault` | After explicit acceptance, import one additive, idempotent batch and never modify the source. | `read:objects`, `write:objects`, `write:content` plus local vault-root authorization |
+| `get_obsidian_import_status` | Read content-free journal progress, warning codes, and the next action. | `read:objects` plus local vault-root authorization |
 | `list_week_plan` | Read the Monday-start planning week and optional unscheduled tasks. | `read:objects`, `read:tasks` |
 | `read_canvas` | Read Canvas cards, edges, references, frames, and warnings. | `read:objects`, `read:content` |
 | `get_project_context` | Load a bounded, citation-ready project resume packet. | `read:objects`; add `read:content`, `read:tasks`, and `search` for all optional sections |
@@ -81,6 +95,14 @@ write access.
 | Weekly review | `read:objects`, `read:content`, `search`, `read:tasks` | "Summarize recent sources and outstanding tasks without making changes." |
 | Task triage | `read:objects`, `read:tasks` | "Propose task field updates but do not apply them." |
 | Confirmed task edits | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` | "Apply only the task changes I explicitly approve." |
+| Custom database design | `read:objects` first; add `write:objects` / `write:content` for apply | "Use the closest recipe, show the exact additive plan, and wait for my approval before applying it." |
+| Obsidian dry run | `read:objects` plus local vault authorization | "Analyze the configured vault, show the plan and warnings, and do not import." |
+| Approved Obsidian import | `read:objects`, `write:objects`, `write:content` | "After my later acceptance, import bounded batches with this exact plan ID/hash and report status." |
 
 `delete_object` is a write operation even though AuroraDocs uses reversible
 soft deletion. Treat it as destructive from the client's point of view.
+
+The Obsidian compatibility `confirmed: true` field is a two-turn signal for
+clients without MCP form elicitation, not cryptographic proof. Native client
+confirmation UI remains authoritative when available. See
+[Obsidian import](obsidian-import.md) before enabling the local root.

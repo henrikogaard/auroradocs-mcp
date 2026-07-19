@@ -16,6 +16,11 @@ logs, screenshots, issues, or support messages. Use the token fingerprint from
 | JSON configuration will not load | Invalid JSON, usually a missing comma or an overwritten outer `mcpServers` object. | Validate the file as JSON and merge the server entry with existing entries. JSON cannot contain comments. |
 | Works in a terminal but not the desktop client | Desktop apps often use a different PATH and environment. | For client mode, pass the API URL and token; for legacy mode, also pass `AURORA_WORKSPACE_ID`. Restart the desktop app. |
 | Client credential reports an ambiguous workspace | The data call omitted a selector or an alias matches more than one grant. | Call `list_workspaces`, then pass one exact `workspace_id` or unambiguous `workspace_alias`. |
+| Obsidian tools say `AURORA_OBSIDIAN_VAULT_ROOT` is required | Local vault access is intentionally disabled. | Add one absolute vault path to the local MCP process only after backing it up, then restart the client. Normal AuroraCloud tools do not need this variable. |
+| Vault or state path is rejected | The root is relative/symlinked, changed identity, or the journal directory is inside the vault. | Use a real absolute vault directory and a separate private `AURORA_MCP_STATE_DIR`; never weaken the path checks. |
+| Import returns `confirmation_required` | The client does not advertise MCP form elicitation. | Present the exact plan to the user, wait for a later explicit acceptance, then call import with the same plan ID/hash and `confirmed: true`. |
+| Import is blocked before writes | The plan expired or changed, the vault changed, scopes/role are insufficient, E2EE is enabled, or attachment storage/quota is unavailable. | Read the bounded warning code, resolve that exact condition, re-analyze when required, and do not retry unchanged input repeatedly. |
+| Import is partial or interrupted | A bounded batch stopped after some additive writes. | Keep the vault unchanged and call status, then retry the same current plan ID/hash. Do not delete successful destination objects as compensation. |
 
 ## AuroraCloud HTTP responses
 
@@ -33,6 +38,11 @@ logs, screenshots, issues, or support messages. Use the token fingerprint from
 For E2EE workspaces, the MCP server cannot decrypt locked content. A locked or
 unavailable response is expected and safer than returning ciphertext. Do not
 grant more scopes to work around it; scopes do not provide encryption keys.
+
+Obsidian plaintext import into an E2EE workspace is blocked even when the local
+client can read the source vault. Use a non-E2EE test destination or wait for an
+importer that can encrypt every write; do not disable E2EE merely to work around
+the importer.
 
 ## Verify each client
 

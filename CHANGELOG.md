@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added additive custom object-type and reusable-template tools, including
+  starter recipes for contacts, interests, equipment, subscriptions, and
+  expenses plus arbitrary reviewable schemas.
+- Added a local, analyze-first Obsidian vault importer with safe YAML/Markdown
+  and JSON Canvas conversion, wiki-link and attachment mapping, bounded plans,
+  explicit MCP elicitation or two-turn compatibility consent, resumable
+  idempotent batches, and content-free private journals.
+- Added `custom_database_design` and `obsidian_import` prompts plus coverage and
+  workflow-recipe guidance for agents.
+
+### Security
+
+- Obsidian access requires one explicit absolute root, stays read-only, rejects
+  symlinks/traversal/root replacement, performs no external fetches, and fails
+  closed before AuroraCloud writes on stale plans, missing scopes, viewer role,
+  E2EE, quota, or storage failures.
+
 ## [0.2.0] - 2026-07-16
 
 ### Added
