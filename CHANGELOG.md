@@ -24,6 +24,9 @@ All notable changes to this project are documented in this file.
   canonical upload URL, stored Canvas dimensions compatibly, resolved local
   Markdown links, rejected unsupported template default types before writes,
   cleared obsolete property columns, and paged through all object types.
+- Kept inferred frontmatter values out of persisted schemas, validated merged
+  schemas before approval, held Canvas content until every referenced attachment
+  completed, and returned an actionable stale-plan error after restart drift.
 
 ## [0.2.1] - 2026-07-20
 

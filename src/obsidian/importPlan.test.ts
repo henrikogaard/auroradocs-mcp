@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, readdir, stat } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -12,6 +12,7 @@ import {
   buildObsidianImportPlan,
   clearStoredObsidianImportPlansForTests,
   getObsidianImportPlanPage,
+  writeObsidianImportPlan,
 } from './importPlan.js'
 import { executeToolCall } from '../tools.js'
 
@@ -134,6 +135,44 @@ test('template mapping survives absent group inference and invalid frontmatter k
   assert.equal(entry?.groupId, null)
 })
 
+test('persisted inferred schemas exclude observed frontmatter values', async () => {
+  const analysis = await fixtureAnalysis()
+  const source = analysis.notes[0]!
+  const notes = ['Acme Secret', 'Beta Secret'].map((client, index) => ({
+    ...source,
+    relativePath: `Clients/${index}.md`, folder: 'Clients', sourceHash: `client-${index}`,
+    frontmatter: { type: 'clients', client }, frontmatterShapes: { type: 'string' as const, client: 'string' as const },
+  }))
+  const plan = buildObsidianImportPlan({ ...analysis, notes, links: [], attachments: [], canvases: [] }, 'workspace-1', {
+    ids: { planId: 'plan-content-free-schema' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const clientField = plan.groups[0]?.schema.find((field) => field.key === 'client')
+  assert.equal(clientField?.value_type, 'text')
+  assert.equal(clientField?.options, undefined)
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'aurora-plan-values-'))
+  const file = await writeObsidianImportPlan(stateDir, plan)
+  assert.doesNotMatch(await readFile(file, 'utf8'), /Acme Secret|Beta Secret/)
+})
+
+test('merged inferred schemas are validated before a plan is returned', async () => {
+  const analysis = await fixtureAnalysis()
+  const source = analysis.notes[0]!
+  const makeNote = (group: string, prefix: string) => ({
+    ...source,
+    relativePath: `${group}.md`, folder: '', sourceHash: `${group}-hash`,
+    frontmatter: Object.fromEntries([['type', group], ...Array.from({ length: 33 }, (_, index) => [`${prefix}_${index}`, index])]),
+    frontmatterShapes: {},
+  })
+  const prepared = { ...analysis, notes: [makeNote('first', 'a'), makeNote('second', 'b')], links: [], attachments: [], canvases: [] }
+  const baseline = buildObsidianImportPlan(prepared, 'workspace-1', {
+    ids: { planId: 'merge-overflow-base' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  assert.throws(() => buildObsidianImportPlan(prepared, 'workspace-1', {
+    ids: { planId: 'merge-overflow' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+    adjustments: [{ groupId: baseline.groups[0]!.id, action: 'merge', mergeWithGroupId: baseline.groups[1]!.id }],
+  }), /64/)
+})
+
 test('plan validation rejects foreign, expired, tampered, root-changed, and inventory-changed plans', async () => {
   const analysis = await fixtureAnalysis()
   const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
@@ -190,6 +229,36 @@ test('approved plans survive an MCP process restart without persisting vault con
     }, 'workspace-restart')
     assert.equal(resumed.type, 'obsidian_import_plan_page')
     assert.doesNotMatch(JSON.stringify(resumed), /ada@example\.test|Template body|Analytical Engines/)
+  } finally {
+    if (previousRoot === undefined) delete process.env['AURORA_OBSIDIAN_VAULT_ROOT']; else process.env['AURORA_OBSIDIAN_VAULT_ROOT'] = previousRoot
+    if (previousStateDir === undefined) delete process.env['AURORA_MCP_STATE_DIR']; else process.env['AURORA_MCP_STATE_DIR'] = previousStateDir
+    clearStoredObsidianImportPlansForTests()
+  }
+})
+
+test('reloaded plans return an actionable stale-plan error after vault drift', async () => {
+  const previousRoot = process.env['AURORA_OBSIDIAN_VAULT_ROOT']
+  const previousStateDir = process.env['AURORA_MCP_STATE_DIR']
+  const root = await mkdtemp(path.join(tmpdir(), 'aurora-plan-stale-'))
+  const vaultRoot = path.join(root, 'Vault')
+  const stateDir = path.join(root, 'state')
+  await cp(fixtureRoot, vaultRoot, { recursive: true })
+  process.env['AURORA_OBSIDIAN_VAULT_ROOT'] = vaultRoot
+  process.env['AURORA_MCP_STATE_DIR'] = stateDir
+  try {
+    const analyzed = await executeToolCall('analyze_obsidian_vault', {}, 'workspace-stale')
+    assert.equal(analyzed.type, 'obsidian_import_plan')
+    if (analyzed.type !== 'obsidian_import_plan') return
+    clearStoredObsidianImportPlansForTests()
+    await writeFile(path.join(vaultRoot, 'Home.md'), '# Changed after approval\n')
+
+    const resumed = await executeToolCall('get_obsidian_import_plan', {
+      plan_id: analyzed.plan.planId,
+    }, 'workspace-stale')
+    assert.equal(resumed.type, 'error')
+    if (resumed.type !== 'error') return
+    assert.equal(resumed.code, 'invalid_input')
+    assert.equal(resumed.message, 'Obsidian import plan is stale; analyze the vault again')
   } finally {
     if (previousRoot === undefined) delete process.env['AURORA_OBSIDIAN_VAULT_ROOT']; else process.env['AURORA_OBSIDIAN_VAULT_ROOT'] = previousRoot
     if (previousStateDir === undefined) delete process.env['AURORA_MCP_STATE_DIR']; else process.env['AURORA_MCP_STATE_DIR'] = previousStateDir

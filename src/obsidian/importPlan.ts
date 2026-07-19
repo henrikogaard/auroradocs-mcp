@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { chmod, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import path from 'node:path'
-import { newAuroraId, type CustomDatabaseRecipeId, type ObjectTypeSchema } from '../customDatabases.js'
+import { newAuroraId, validateCustomDatabaseSchema, type CustomDatabaseRecipeId, type ObjectTypeSchema } from '../customDatabases.js'
 import type { VaultAnalysis } from './analyzer.js'
 import { inferObsidianGroups, type InferredGroup } from './inference.js'
 
@@ -172,7 +172,7 @@ function applyAdjustments(
       target.noteCount += group.noteCount
       target.samplePaths = [...new Set([...target.samplePaths, ...group.samplePaths])].slice(0, 5)
       target.evidence.push(`Merged from ${group.name} by approved adjustment.`)
-      target.schema = mergeGroupSchemas(target.schema, group.schema)
+      target.schema = validateCustomDatabaseSchema(mergeGroupSchemas(target.schema, group.schema))
       group.decision = 'reject'
     }
     if (adjustment.action === 'split') {

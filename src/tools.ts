@@ -185,7 +185,11 @@ async function loadStoredObsidianImportPlan(
   if (!plan || plan.workspaceId !== workspaceId) return null
   const vault = await openAuthorizedVault(config)
   const analysis = await analyzeObsidianVault(vault)
-  assertCurrentObsidianImportPlan(plan, analysis, workspaceId, new Date(plan.createdAt))
+  try {
+    assertCurrentObsidianImportPlan(plan, analysis, workspaceId, new Date(plan.createdAt))
+  } catch {
+    throw new ToolInputError('Obsidian import plan is stale; analyze the vault again')
+  }
   storeObsidianImportPlan(plan, analysis)
   return { plan, analysis }
 }

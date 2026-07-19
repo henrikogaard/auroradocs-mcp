@@ -382,6 +382,13 @@ export async function runObsidianImportBatch(
       if (entry.kind === 'canvas') {
         const canvas = stored.analysis.canvases.find((candidate) => candidate.relativePath === entry.relativePath)
         if (!canvas) throw new Error('canvas missing')
+        if (stored.plan.attachmentPolicy === 'referenced') {
+          const missingAttachment = stored.analysis.attachments.find(
+            (attachment) => attachment.referencedBy.includes(entry.relativePath)
+              && journal.attachments[attachmentJournalKey(attachment)]?.status !== 'complete',
+          )
+          if (missingAttachment) throw new Error('attachment prerequisite failed')
+        }
         const converted = convertObsidianCanvas(canvas, { objectIdsByPath, attachmentsByPath: attachmentDestinations, unsupportedPolicy: stored.plan.unsupportedPolicy })
         await dependencies.setContent(stored.plan.workspaceId, entry.objectId, converted.content)
         if (converted.warnings.length) state.warningCodes.push('canvas_fidelity_warning')

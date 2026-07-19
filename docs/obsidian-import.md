@@ -147,7 +147,8 @@ silently resumed.
 
 Attachment journal identities bind both the approved relative path and content
 hash. Bytes are rehashed immediately before upload, and imported content reuses
-the canonical URL returned by AuroraCloud.
+the canonical URL returned by AuroraCloud. Note and Canvas content remains
+pending until all of its referenced attachments have completed.
 
 ## Preflight failures
 

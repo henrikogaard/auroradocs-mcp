@@ -222,6 +222,29 @@ test('failed attachment writes keep an otherwise completed batch partial', async
   assert.ok(result.remaining >= 1)
 })
 
+test('Canvas content waits until every referenced attachment upload completes', async () => {
+  const { vault, vaultRoot, stateDir } = await copiedVault()
+  await writeFile(path.join(vaultRoot, 'Map.canvas'), JSON.stringify({
+    nodes: [{
+      id: 'attachment-1', type: 'file', file: 'Assets/manual.pdf',
+      x: 0, y: 0, width: 300, height: 180,
+    }],
+    edges: [],
+  }))
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
+    hierarchyPolicy: 'flatten', attachmentPolicy: 'referenced',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const canvas = plan.entries.find((entry) => entry.relativePath === 'Map.canvas')!
+  const fake = fakeDependencies()
+  fake.dependencies.uploadAttachment = async () => { throw new Error('upload unavailable') }
+
+  const result = await runObsidianImportBatch({ plan, analysis }, vault, stateDir, { batchSize: 100, dependencies: fake.dependencies })
+  assert.equal(result.status, 'partial')
+  assert.equal(fake.content.has(canvas.objectId), false)
+})
+
 test('quota preflight counts only attachments that have not already uploaded', async () => {
   const { vault, stateDir } = await copiedVault()
   const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
