@@ -66,6 +66,39 @@ model. Browser-only workspaces and Local folders workspaces are unsupported.
 The server does not scan local AuroraDocs data or silently promote a workspace
 to AuroraCloud.
 
+## Local Obsidian vault boundary — 0.2.1 source
+
+Obsidian access is disabled unless `AURORA_OBSIDIAN_VAULT_ROOT` names one
+absolute local directory. That setting authorizes read-only analysis only. The
+reader pins the canonical root identity, rejects root and child symlinks,
+absolute child paths, traversal, changed roots, oversized inputs, and excessive
+entry counts. It allowlists Markdown, JSON Canvas, referenced attachments, and
+the small `.obsidian` configuration needed for Templates; plugin data,
+executables, `.git`, trash, caches, environment files, parents, and siblings are
+not scanned. No parser fetches remote URLs and the source vault is never
+modified.
+
+Import requires a separate, exact plan ID/hash acceptance. Form-capable MCP
+clients receive an elicitation request; only protocol `accept` with
+`confirmed: true` and unchanged policy choices proceeds. Decline, cancel,
+malformed content, changed choices, or an unavailable elicitation client without
+a later exact confirmation performs zero writes. Plans are workspace-bound,
+expire, and are rejected after any source inventory or root-identity change.
+
+Before each batch AuroraCloud rechecks the effective grant, writable role,
+`read:objects`, `write:objects`, `write:content`, E2EE state, attachment size,
+quota, and storage availability. E2EE plaintext import fails closed. Attachment
+uploads use one parent-bound MCP route and stable idempotency keys; the MCP
+cannot list, replace, or delete arbitrary files through that boundary.
+
+The resume journal lives outside the vault in a 0700 directory with 0600 files
+and atomic replacement. It stores hashes, destination IDs, cursor/status,
+bounded codes, and timestamps—not bodies, frontmatter values, bytes, tokens,
+credentials, or absolute paths. Restarting invalidates the in-memory plan and
+requires a fresh analysis and acceptance. Review the MCP client's own prompt,
+tool-result, and retention behavior because it is outside this package's
+control.
+
 ## Data and telemetry
 
 Tool calls send the selected workspace requests to AuroraCloud. The package

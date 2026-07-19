@@ -29,6 +29,12 @@ import {
   readCanvasContent,
   searchWorkspaceKnowledgeServer,
   searchObjectsPage,
+  listAuroraObjectTypes,
+  createAuroraObjectType,
+  updateAuroraObjectType,
+  listAuroraTemplates,
+  createAuroraTemplate,
+  createAuroraObjectFromTemplate,
 } from './auroraClient.js'
 import type { AuroraWorkspaceMember, AuroraTaskList, AuroraTaskProps, WorkspaceKnowledgeSource } from './auroraClient.js'
 import { buildWeekPlan, normalizeCanvasContent } from './planningTools.js'
@@ -38,6 +44,43 @@ import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
 import { readBoundedInteger, readWorkspaceSelector } from './input.js'
 import { ToolInputError, toSafeToolError } from './errors.js'
 import { getProjectContext, listProjectChanges } from './projectContext.js'
+import {
+  CUSTOM_DATABASE_RECIPES,
+  assertApplicableCustomDatabasePlan,
+  buildCustomDatabasePlan,
+  normalizeSchemaKey,
+  summarizeCustomDatabasePlan,
+  validateAdditiveObjectTypePatch,
+  validateCustomDatabaseSchema,
+} from './customDatabases.js'
+import type {
+  CustomDatabasePlan,
+  CustomDatabaseRecipe,
+  CustomDatabaseTemplateDefault,
+  CustomDatabaseTemplateDefinition,
+  ObjectTypeDef,
+  ObjectTypeSchema,
+  PropertyValueType,
+} from './customDatabases.js'
+import { resolveObsidianConfig } from './obsidian/config.js'
+import { openAuthorizedVault } from './obsidian/vaultAccess.js'
+import { analyzeObsidianVault } from './obsidian/analyzer.js'
+import {
+  buildObsidianImportPlan,
+  getObsidianImportPlanPage,
+  getStoredObsidianImportPlan,
+  storeObsidianImportPlan,
+  summarizeObsidianImportPlan,
+} from './obsidian/importPlan.js'
+import type { ObsidianGroupAdjustment, ObsidianImportPlanPreview } from './obsidian/importPlan.js'
+import {
+  decideObsidianImportConsent,
+  type ObsidianConsentPreview,
+  type ObsidianConsentRequest,
+} from './obsidian/consent.js'
+import { runObsidianImportBatch, type ObsidianImportBatchResult } from './obsidian/importer.js'
+import { readImportJournal, summarizeImportJournal, type ObsidianImportStatus } from './obsidian/journal.js'
+import type { StoredObsidianImportPlan } from './obsidian/importPlan.js'
 import type {
   AuroraConnectionContext,
   Availability,
@@ -65,6 +108,19 @@ export type ToolResult =
   | { type: 'knowledge_sources'; sources: WorkspaceKnowledgeSource[] }
   | { type: 'mcp_tool_coverage'; audit: McpToolCoverageAudit }
   | { type: 'mcp_workflow_recipes'; recipes: McpWorkflowRecipe[] }
+  | { type: 'object_types'; object_types: ObjectTypeDef[] }
+  | { type: 'custom_database_recipes'; recipes: CustomDatabaseRecipe[] }
+  | { type: 'custom_database_plan'; plan: CustomDatabasePlan; summary: string }
+  | { type: 'custom_database_applied'; outcome: 'created' | 'updated' | 'reused'; object_type: ObjectTypeDef; template_id: string | null; plan_id: string; plan_hash: string }
+  | { type: 'object_type_updated'; object_type: ObjectTypeDef }
+  | { type: 'templates'; templates: { id: string; title: string | null; type: string; icon: string | null }[] }
+  | { type: 'template_created'; template: { id: string; title: string | null; type: string; icon: string | null } }
+  | { type: 'template_instantiated'; template_id: string; object_id: string }
+  | { type: 'obsidian_import_plan'; plan: ObsidianImportPlanPreview }
+  | { type: 'obsidian_import_plan_page'; page: ReturnType<typeof getObsidianImportPlanPage> }
+  | { type: 'obsidian_import_confirmation_required'; plan_id: string; plan_hash: string; preview: ObsidianConsentPreview }
+  | { type: 'obsidian_import_batch'; result: ObsidianImportBatchResult }
+  | { type: 'obsidian_import_status'; status: ObsidianImportStatus }
   | { type: 'week_plan'; plan: McpWeekPlan }
   | { type: 'canvas'; canvas: McpCanvasReadResult }
   | { type: 'scheduled_task_block'; id: string; title: string | null; due_date: string; mode: string }
@@ -80,6 +136,12 @@ export type McpToolCallResult = {
   content: [{ type: 'text'; text: string }]
   structuredContent: ToolResult
   isError: boolean
+}
+
+export type ToolExecutionOptions = {
+  requestObsidianImportConsent?: ObsidianConsentRequest
+  runObsidianImport?: (stored: StoredObsidianImportPlan, batchSize: number) => Promise<ObsidianImportBatchResult>
+  now?: () => Date
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -102,6 +164,144 @@ function invalidInput(message: string): ToolErrorResult {
 
 function notFound(message: string): ToolErrorResult {
   return { type: 'error', code: 'not_found', message, retryable: false }
+}
+
+const CUSTOM_DATABASE_PLANS = new Map<string, CustomDatabasePlan>()
+
+function cloneRecipe(recipe: CustomDatabaseRecipe): CustomDatabaseRecipe {
+  return {
+    ...recipe,
+    schema: recipe.schema.map((field) => ({ ...field, ...(field.options ? { options: [...field.options] } : {}) })),
+    ...(recipe.template ? {
+      template: {
+        ...recipe.template,
+        ...(recipe.template.defaults ? { defaults: recipe.template.defaults.map((value) => ({ ...value })) } : {}),
+      },
+    } : {}),
+  }
+}
+
+function storeCustomDatabasePlan(plan: CustomDatabasePlan): void {
+  const now = Date.now()
+  for (const [key, value] of CUSTOM_DATABASE_PLANS) {
+    if (Date.parse(value.expiresAt) <= now) CUSTOM_DATABASE_PLANS.delete(key)
+  }
+  while (CUSTOM_DATABASE_PLANS.size >= 100) {
+    const oldest = CUSTOM_DATABASE_PLANS.keys().next().value as string | undefined
+    if (!oldest) break
+    CUSTOM_DATABASE_PLANS.delete(oldest)
+  }
+  CUSTOM_DATABASE_PLANS.set(`${plan.workspaceId}:${plan.planId}`, plan)
+}
+
+function optionalPresentation(input: Record<string, unknown>, key: 'icon' | 'color'): string | null | undefined {
+  if (!Object.hasOwn(input, key)) return undefined
+  const value = input[key]
+  if (value === null) return null
+  if (typeof value !== 'string') throw new ToolInputError(`${key} must be text or null`)
+  const trimmed = value.trim()
+  return trimmed || null
+}
+
+function parseObjectTypeSchema(value: unknown, existing: ObjectTypeSchema[] = []): ObjectTypeSchema[] {
+  if (!Array.isArray(value)) throw new ToolInputError('schema must be an array')
+  const existingByKey = new Map(existing.map((field) => [normalizeSchemaKey(field.key), field]))
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new ToolInputError(`schema field ${index + 1} must be an object`)
+    const raw = entry as Record<string, unknown>
+    const key = normalizeSchemaKey(String(raw['key'] ?? ''))
+    const current = existingByKey.get(key)
+    const valueType = (typeof raw['value_type'] === 'string' ? raw['value_type'] : current?.value_type) as PropertyValueType | undefined
+    if (!valueType) throw new ToolInputError(`schema field "${key}" requires value_type`)
+    const label = typeof raw['label'] === 'string' ? raw['label'] : current?.label
+    if (!label) throw new ToolInputError(`schema field "${key}" requires label`)
+    const required = typeof raw['required'] === 'boolean' ? raw['required'] : current?.required ?? false
+    const next: ObjectTypeSchema = { key, label, value_type: valueType, required }
+    const copyString = (property: 'storageType' | 'targetType' | 'formula') => {
+      const rawValue = raw[property]
+      const fallback = current?.[property]
+      if (rawValue !== undefined) {
+        if (typeof rawValue !== 'string') throw new ToolInputError(`${property} for "${key}" must be text`)
+        next[property] = rawValue
+      } else if (fallback !== undefined) next[property] = fallback
+    }
+    copyString('storageType'); copyString('targetType'); copyString('formula')
+    if (raw['sensitive'] !== undefined) {
+      if (typeof raw['sensitive'] !== 'boolean') throw new ToolInputError(`sensitive for "${key}" must be boolean`)
+      next.sensitive = raw['sensitive']
+    } else if (current?.sensitive !== undefined) next.sensitive = current.sensitive
+    if (raw['options'] !== undefined) {
+      if (!Array.isArray(raw['options'])) throw new ToolInputError(`options for "${key}" must be an array`)
+      next.options = raw['options'].map((option) => String(option))
+    } else if (current?.options) next.options = [...current.options]
+    return next
+  })
+}
+
+function parseTemplateDefaults(value: unknown): CustomDatabaseTemplateDefault[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value)) throw new ToolInputError('template defaults must be an array')
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new ToolInputError(`template default ${index + 1} must be an object`)
+    const raw = entry as Record<string, unknown>
+    const key = readString(raw['key'])
+    const valueType = readString(raw['value_type'] ?? raw['valueType']) as PropertyValueType | null
+    const defaultValue = raw['value']
+    if (!key || !valueType) throw new ToolInputError(`template default ${index + 1} requires key and value_type`)
+    if (defaultValue !== null && typeof defaultValue !== 'string' && typeof defaultValue !== 'number' && typeof defaultValue !== 'boolean') {
+      throw new ToolInputError(`template default "${key}" has an unsupported value`)
+    }
+    return { key, valueType, value: defaultValue }
+  })
+}
+
+function parseTemplateDefinition(value: unknown): CustomDatabaseTemplateDefinition | null {
+  if (value === null) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ToolInputError('template must be an object or null')
+  const raw = value as Record<string, unknown>
+  const title = readString(raw['title'])
+  if (!title) throw new ToolInputError('template title is required')
+  if (raw['body'] !== undefined && typeof raw['body'] !== 'string') throw new ToolInputError('template body must be text')
+  const icon = raw['icon'] === null ? null : raw['icon'] === undefined ? undefined : readString(raw['icon'])
+  return { title, ...(icon !== undefined ? { icon } : {}), ...(raw['body'] !== undefined ? { body: raw['body'] as string } : {}), ...(raw['defaults'] !== undefined ? { defaults: parseTemplateDefaults(raw['defaults']) } : {}) }
+}
+
+function parseObsidianAdjustments(value: unknown): ObsidianGroupAdjustment[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.length > 100) throw new ToolInputError('adjustments must be an array with at most 100 items')
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new ToolInputError(`adjustment ${index + 1} must be an object`)
+    const raw = entry as Record<string, unknown>
+    const groupId = readString(raw['group_id'])
+    const action = readString(raw['action'])
+    if (!groupId || !action) throw new ToolInputError(`adjustment ${index + 1} requires group_id and action`)
+    if (action === 'accept' || action === 'reject') return { groupId, action }
+    if (action === 'rename') {
+      const name = readString(raw['name'])
+      if (!name) throw new ToolInputError('rename adjustment requires name')
+      return { groupId, action, name }
+    }
+    if (action === 'merge') {
+      const mergeWithGroupId = readString(raw['merge_with_group_id'])
+      if (!mergeWithGroupId) throw new ToolInputError('merge adjustment requires merge_with_group_id')
+      return { groupId, action, mergeWithGroupId }
+    }
+    if (action === 'split') {
+      const splitBy = readString(raw['split_by'])
+      if (splitBy !== 'folder' && splitBy !== 'explicit_type' && splitBy !== 'property_signature') {
+        throw new ToolInputError('split adjustment requires split_by: folder, explicit_type, or property_signature')
+      }
+      return { groupId, action, splitBy }
+    }
+    throw new ToolInputError(`Unknown adjustment action: ${action}`)
+  })
+}
+
+function readPolicy<T extends string>(input: Record<string, unknown>, key: string, allowed: readonly T[], fallback: T): T {
+  if (!Object.hasOwn(input, key)) return fallback
+  const value = readString(input[key])
+  if (!value || !allowed.includes(value as T)) throw new ToolInputError(`${key} must be one of: ${allowed.join(', ')}`)
+  return value as T
 }
 
 function todayDateKey(): string {
@@ -233,14 +433,15 @@ export async function executeToolCall(
   name: string,
   input: Record<string, unknown>,
   connection: AuroraConnectionContext | string,
+  options: ToolExecutionOptions = {},
 ): Promise<ToolResult> {
   try {
     const context = normalizeConnectionContext(connection)
     if (name === 'list_workspaces') return { type: 'workspaces', workspaces: context.workspaces }
-    if (name === 'get_mcp_tool_coverage' || name === 'get_mcp_workflow_recipes') {
-      return await executeToolCallUnsafe(name, input, context.kind === 'legacy_workspace' ? context.defaultWorkspaceId : '')
+    if (name === 'get_mcp_tool_coverage' || name === 'get_mcp_workflow_recipes' || name === 'get_custom_database_recipes') {
+      return await executeToolCallUnsafe(name, input, context.kind === 'legacy_workspace' ? context.defaultWorkspaceId : '', options)
     }
-    return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input))
+    return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input), options)
   } catch (error) {
     return toSafeToolError(error)
   }
@@ -250,6 +451,7 @@ async function executeToolCallUnsafe(
   name: string,
   input: Record<string, unknown>,
   workspaceId: string,
+  options: ToolExecutionOptions,
 ): Promise<ToolResult> {
   switch (name) {
       // ── Read tools ─────────────────────────────────────────────────────
@@ -379,6 +581,220 @@ async function executeToolCallUnsafe(
 
       case 'get_mcp_workflow_recipes':
         return { type: 'mcp_workflow_recipes', recipes: getMcpWorkflowRecipes() }
+
+      case 'get_custom_database_recipes':
+        return { type: 'custom_database_recipes', recipes: CUSTOM_DATABASE_RECIPES.map(cloneRecipe) }
+
+      case 'analyze_obsidian_vault': {
+        let config
+        try { config = resolveObsidianConfig() } catch (error) {
+          throw new ToolInputError(error instanceof Error ? error.message : 'Obsidian vault authorization is unavailable')
+        }
+        const vault = await openAuthorizedVault(config)
+        const analysis = await analyzeObsidianVault(vault)
+        const plan = buildObsidianImportPlan(analysis, workspaceId, {
+          hierarchyPolicy: readPolicy(input, 'hierarchy_policy', ['spaces', 'parents', 'flatten'] as const, 'spaces'),
+          collisionPolicy: readPolicy(input, 'collision_policy', ['rename', 'skip', 'fail'] as const, 'rename'),
+          attachmentPolicy: readPolicy(input, 'attachment_policy', ['referenced', 'skip'] as const, 'referenced'),
+          unsupportedPolicy: readPolicy(input, 'unsupported_policy', ['preserve', 'skip'] as const, 'preserve'),
+          adjustments: parseObsidianAdjustments(input['adjustments']),
+        })
+        storeObsidianImportPlan(plan, analysis)
+        return { type: 'obsidian_import_plan', plan: summarizeObsidianImportPlan(plan) }
+      }
+
+      case 'get_obsidian_import_plan': {
+        const planId = readString(input['plan_id'])
+        if (!planId) return invalidInput('Plan ID is required')
+        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        if (!stored) return notFound('Obsidian import plan was not found for this workspace')
+        if (Date.now() >= Date.parse(stored.plan.expiresAt)) return invalidInput('Obsidian import plan has expired; analyze the vault again')
+        const section = readString(input['section']) ?? 'groups'
+        if (section !== 'groups' && section !== 'entries' && section !== 'warnings') return invalidInput('section must be groups, entries, or warnings')
+        const page = readBoundedInteger(input, 'page', { defaultValue: 1, min: 1, max: 10_000 })
+        if (!page.ok) return invalidInput(page.message)
+        const perPage = readBoundedInteger(input, 'per_page', { defaultValue: 50, min: 1, max: 100 })
+        if (!perPage.ok) return invalidInput(perPage.message)
+        return { type: 'obsidian_import_plan_page', page: getObsidianImportPlanPage(stored.plan, section, page.value, perPage.value) }
+      }
+
+      case 'import_obsidian_vault': {
+        const planId = readString(input['plan_id'])
+        const planHash = readString(input['plan_hash'])
+        if (!planId || !planHash) return invalidInput('Plan ID and plan hash are required')
+        if (input['confirmed'] !== undefined && typeof input['confirmed'] !== 'boolean') return invalidInput('confirmed must be a boolean')
+        const batchSize = readBoundedInteger(input, 'batch_size', { defaultValue: 50, min: 1, max: 100 })
+        if (!batchSize.ok) return invalidInput(batchSize.message)
+        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        if (!stored || stored.plan.planHash !== planHash) return invalidInput('The Obsidian import plan is missing or does not match the approved hash')
+        const now = options.now?.() ?? new Date()
+        if (now.getTime() >= Date.parse(stored.plan.expiresAt)) return invalidInput('Obsidian import plan has expired; analyze the vault again')
+        const summary = summarizeObsidianImportPlan(stored.plan)
+        const preview: ObsidianConsentPreview = {
+          planId: summary.planId, planHash: summary.planHash,
+          vaultDisplayName: summary.vaultDisplayName, workspaceId: summary.workspaceId,
+          counts: {
+            notes: summary.counts.notes, templates: summary.counts.templates,
+            canvases: summary.counts.canvases, attachments: summary.counts.attachments,
+            customGroups: summary.counts.customGroups,
+          },
+          policies: summary.policies,
+          acceptedGroupCount: stored.plan.groups.filter((group) => group.decision === 'accept').length,
+        }
+        const consent = await decideObsidianImportConsent({
+          confirmed: input['confirmed'], preview,
+          requestConsent: options.requestObsidianImportConsent,
+        })
+        if (consent.outcome === 'confirmation_required') {
+          return { type: 'obsidian_import_confirmation_required', plan_id: planId, plan_hash: planHash, preview }
+        }
+        if (consent.outcome !== 'accepted') {
+          const message = consent.outcome === 'adjustment_required'
+            ? 'Import not started. Re-analyze with the requested policy or group changes, then review the new plan.'
+            : 'Obsidian import was not approved; no AuroraDocs writes were performed.'
+          return { type: 'no_op', message }
+        }
+        const run = options.runObsidianImport ?? (async (approved, size) => {
+          let config
+          try { config = resolveObsidianConfig() } catch (error) {
+            throw new ToolInputError(error instanceof Error ? error.message : 'Obsidian vault authorization is unavailable')
+          }
+          const vault = await openAuthorizedVault(config)
+          return runObsidianImportBatch(approved, vault, config.stateDir, { batchSize: size })
+        })
+        return { type: 'obsidian_import_batch', result: await run(stored, batchSize.value) }
+      }
+
+      case 'get_obsidian_import_status': {
+        const planId = readString(input['plan_id'])
+        if (!planId) return invalidInput('Plan ID is required')
+        const stored = getStoredObsidianImportPlan(workspaceId, planId)
+        if (!stored) return notFound('Obsidian import plan was not found for this workspace')
+        let config
+        try { config = resolveObsidianConfig() } catch (error) {
+          throw new ToolInputError(error instanceof Error ? error.message : 'Obsidian vault authorization is unavailable')
+        }
+        const journal = await readImportJournal(config.stateDir, planId)
+        if (journal && journal.workspaceId !== workspaceId) return notFound('Obsidian import status was not found for this workspace')
+        return { type: 'obsidian_import_status', status: summarizeImportJournal(stored.plan, journal) }
+      }
+
+      case 'list_object_types': {
+        const objectTypes = await listAuroraObjectTypes(workspaceId)
+        return { type: 'object_types', object_types: objectTypes }
+      }
+
+      case 'plan_custom_database': {
+        const recipeId = readString(input['recipe_id'])
+        const recipe = recipeId ? CUSTOM_DATABASE_RECIPES.find((entry) => entry.id === recipeId) : undefined
+        if (recipeId && !recipe) return invalidInput(`Unknown custom database recipe: ${recipeId}`)
+        const name = readString(input['name']) ?? recipe?.name ?? null
+        if (!name) return invalidInput('Custom database name is required')
+        const schema = input['schema'] === undefined
+          ? recipe?.schema.map((field) => ({ ...field, ...(field.options ? { options: [...field.options] } : {}) }))
+          : parseObjectTypeSchema(input['schema'])
+        if (!schema) return invalidInput('A free-form custom database requires a schema')
+        const template = Object.hasOwn(input, 'template')
+          ? parseTemplateDefinition(input['template'])
+          : recipe?.template ? cloneRecipe(recipe).template ?? null : null
+        const objectTypes = await listAuroraObjectTypes(workspaceId)
+        const requestedIcon = optionalPresentation(input, 'icon')
+        const requestedColor = optionalPresentation(input, 'color')
+        const plan = buildCustomDatabasePlan({
+          workspaceId, name,
+          icon: requestedIcon === undefined ? recipe?.icon ?? null : requestedIcon,
+          color: requestedColor === undefined ? recipe?.color ?? null : requestedColor,
+          schema, template,
+          source: recipe ? { kind: 'recipe', value: recipe.id } : { kind: 'free_form', value: name },
+          existingTypes: objectTypes,
+          assumptions: Array.isArray(input['assumptions']) ? input['assumptions'].map((entry) => String(entry).trim()).filter(Boolean).slice(0, 20) : [],
+        })
+        storeCustomDatabasePlan(plan)
+        return { type: 'custom_database_plan', plan, summary: summarizeCustomDatabasePlan(plan) }
+      }
+
+      case 'apply_custom_database_plan': {
+        const planId = readString(input['plan_id'])
+        const planHash = readString(input['plan_hash'])
+        if (!planId || !planHash) return invalidInput('Plan ID and plan hash are required')
+        const plan = CUSTOM_DATABASE_PLANS.get(`${workspaceId}:${planId}`)
+        if (!plan || plan.planHash !== planHash) return invalidInput('The custom database plan is missing, expired, or does not match the approved hash')
+        const existingTypes = await listAuroraObjectTypes(workspaceId)
+        const applicable = assertApplicableCustomDatabasePlan(plan, workspaceId, existingTypes)
+        let objectType: ObjectTypeDef
+        let outcome: 'created' | 'updated' | 'reused'
+        if (applicable.outcome === 'create') {
+          objectType = await createAuroraObjectType(workspaceId, {
+            id: plan.operation.objectTypeId, name: plan.name, icon: plan.icon, color: plan.color, schema: plan.schema,
+          })
+          outcome = 'created'
+        } else if (applicable.outcome === 'update') {
+          objectType = await updateAuroraObjectType(workspaceId, plan.operation.objectTypeId, {
+            name: plan.name, icon: plan.icon, color: plan.color, schema: plan.schema,
+          })
+          outcome = 'updated'
+        } else {
+          objectType = applicable.existing as ObjectTypeDef
+          outcome = 'reused'
+        }
+        let templateId: string | null = null
+        if (plan.template) {
+          const template = await createAuroraTemplate({
+            workspaceId, objectId: plan.template.objectId, type: `custom:${objectType.id}`,
+            title: plan.template.title, icon: plan.template.icon, body: plan.template.body, defaults: plan.template.defaults,
+          })
+          templateId = template.id
+        }
+        return { type: 'custom_database_applied', outcome, object_type: objectType, template_id: templateId, plan_id: plan.planId, plan_hash: plan.planHash }
+      }
+
+      case 'update_object_type': {
+        const id = readString(input['id'])
+        if (!id) return invalidInput('Object type ID is required')
+        const objectTypes = await listAuroraObjectTypes(workspaceId)
+        const existing = objectTypes.find((entry) => entry.id === id)
+        if (!existing) return notFound(`Object type ${id} not found in this workspace`)
+        const name = Object.hasOwn(input, 'name') ? readString(input['name']) : existing.name
+        if (!name) return invalidInput('Object type name cannot be empty')
+        if (objectTypes.some((entry) => entry.id !== id && entry.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+          return invalidInput(`Another object type already uses the name "${name}"`)
+        }
+        const proposed = input['schema'] === undefined ? existing.schema : parseObjectTypeSchema(input['schema'], existing.schema)
+        const normalized = validateCustomDatabaseSchema(proposed, { existingTypes: objectTypes, selfTargetType: `custom:${id}` })
+        const schema = validateAdditiveObjectTypePatch(existing.schema, normalized)
+        const icon = optionalPresentation(input, 'icon')
+        const color = optionalPresentation(input, 'color')
+        const updated = await updateAuroraObjectType(workspaceId, id, {
+          name, icon: icon === undefined ? existing.icon : icon, color: color === undefined ? existing.color : color, schema,
+        })
+        return { type: 'object_type_updated', object_type: updated }
+      }
+
+      case 'list_templates': {
+        const type = readString(input['type']) ?? undefined
+        const templates = await listAuroraTemplates(workspaceId, type)
+        return { type: 'templates', templates: templates.map((template) => ({ id: template.id, title: template.title, type: template.type, icon: template.icon })) }
+      }
+
+      case 'create_template': {
+        const type = readString(input['type'])
+        const title = readString(input['title'])
+        if (!type || !title) return invalidInput('Template type and title are required')
+        if (input['body'] !== undefined && typeof input['body'] !== 'string') return invalidInput('Template body must be text')
+        const template = await createAuroraTemplate({
+          workspaceId, objectId: readString(input['object_id']) ?? undefined, type, title,
+          icon: optionalPresentation(input, 'icon'), body: input['body'] as string | undefined,
+          defaults: parseTemplateDefaults(input['defaults']),
+        })
+        return { type: 'template_created', template: { id: template.id, title: template.title, type: template.type, icon: template.icon } }
+      }
+
+      case 'create_from_template': {
+        const templateId = readString(input['template_id'])
+        if (!templateId) return invalidInput('Template ID is required')
+        const objectId = await createAuroraObjectFromTemplate(workspaceId, templateId, readString(input['object_id']) ?? undefined)
+        return { type: 'template_instantiated', template_id: templateId, object_id: objectId }
+      }
 
       case 'get_project_context': {
         const projectId = readString(input['project_id'])
@@ -806,6 +1222,54 @@ export function formatToolResult(result: ToolResult): string {
         `Tools: ${recipe.toolSteps.join(' -> ')}`,
         `Prompt: ${recipe.prompt}`,
       ].join('\n')).join('\n\n')
+    case 'object_types':
+      return result.object_types.length
+        ? result.object_types.map((entry) => `- ${entry.name} (${entry.id}): ${entry.schema.length} properties`).join('\n')
+        : 'No custom object types found.'
+    case 'custom_database_recipes':
+      return result.recipes.map((entry) => `- ${entry.name} (${entry.id}): ${entry.description}`).join('\n')
+    case 'custom_database_plan':
+      return `${result.summary}\nPlan ID: ${result.plan.planId}\nPlan hash: ${result.plan.planHash}\nExpires: ${result.plan.expiresAt}`
+    case 'custom_database_applied':
+      return `Custom database ${result.outcome}: ${result.object_type.name} (${result.object_type.id})${result.template_id ? `; template ${result.template_id}` : ''}`
+    case 'object_type_updated':
+      return `Object type updated: ${result.object_type.name} (${result.object_type.id})`
+    case 'templates':
+      return result.templates.length ? result.templates.map((entry) => `- ${entry.title ?? '(Untitled)'} [${entry.type}] (${entry.id})`).join('\n') : 'No templates found.'
+    case 'template_created':
+      return `Template created: ${result.template.title ?? '(Untitled)'} (${result.template.id})`
+    case 'template_instantiated':
+      return `Created ${result.object_id} from template ${result.template_id}`
+    case 'obsidian_import_plan':
+      return [
+        `Obsidian plan ${result.plan.planId} (${result.plan.planHash})`,
+        `Vault: ${result.plan.vaultDisplayName}; workspace: ${result.plan.workspaceId}`,
+        `Notes: ${result.plan.counts.notes}; templates: ${result.plan.counts.templates}; Canvas: ${result.plan.counts.canvases}; attachments: ${result.plan.counts.attachments}`,
+        `Groups: ${result.plan.groups.map((group) => `${group.name} (${group.noteCount})`).join(', ') || 'none'}`,
+        result.plan.nextAction,
+      ].join('\n')
+    case 'obsidian_import_plan_page':
+      return JSON.stringify(result.page, null, 2)
+    case 'obsidian_import_confirmation_required':
+      return [
+        `Confirmation required for Obsidian plan ${result.plan_id} (${result.plan_hash}).`,
+        `Vault: ${result.preview.vaultDisplayName}; workspace: ${result.preview.workspaceId}.`,
+        `Notes: ${result.preview.counts.notes}; templates: ${result.preview.counts.templates}; Canvas: ${result.preview.counts.canvases}; attachments: ${result.preview.counts.attachments}.`,
+        'Present this plan to the user and wait for a later user message. Then call import_obsidian_vault with the exact plan_id, plan_hash, and confirmed: true.',
+      ].join('\n')
+    case 'obsidian_import_batch':
+      return [
+        `Obsidian import ${result.result.status}: ${result.result.completed} complete, ${result.result.failed} failed, ${result.result.remaining} remaining.`,
+        `Plan: ${result.result.planId} (${result.result.planHash}).`,
+        result.result.nextCursor === null ? 'No next cursor.' : `Next cursor: ${result.result.nextCursor}.`,
+        result.result.warnings.length ? `Warnings: ${result.result.warnings.map((warning) => warning.code).join(', ')}` : 'Warnings: none.',
+      ].join('\n')
+    case 'obsidian_import_status':
+      return [
+        `Obsidian import ${result.status.status}: ${result.status.completed} complete, ${result.status.failed} failed, ${result.status.remaining} remaining.`,
+        `Plan: ${result.status.planId} (${result.status.planHash}).`,
+        result.status.nextAction,
+      ].join('\n')
     case 'week_plan':
       return [
         `Week ${result.plan.range.start} to ${result.plan.range.end}`,

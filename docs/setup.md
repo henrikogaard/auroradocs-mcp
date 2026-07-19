@@ -62,6 +62,20 @@ Every new client entry provides these values:
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
 
+For the `0.2.1` source Obsidian importer, add these only after backing up the
+source vault and choosing a test destination. It is not in the published
+`0.2.0` package:
+
+| Variable | Value |
+| --- | --- |
+| `AURORA_OBSIDIAN_VAULT_ROOT` | Absolute path to the single vault authorized for read-only analysis |
+| `AURORA_MCP_STATE_DIR` | Optional absolute journal directory outside the vault; defaults to the current user's private `.auroradocs-mcp` directory |
+
+The vault-root variable does not authorize AuroraDocs writes. The later import
+tool has a separate review and acceptance gate. Removing the variable disables
+Obsidian tools without affecting normal AuroraCloud tools. See
+[Obsidian import](obsidian-import.md).
+
 Generic stdio configuration:
 
 ```json

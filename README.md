@@ -4,8 +4,9 @@
 granted AuroraCloud workspaces. It runs on your computer over stdio and sends
 authenticated requests to `https://api.auroradocs.eu`.
 
-The public package is `@henrikogard/auroradocs-mcp`, the executable is
-`aurora-mcp`, and this documentation targets version `0.2.0`.
+The public package is `@henrikogard/auroradocs-mcp` and the executable is
+`aurora-mcp`. The latest published package is `0.2.0`; the current source
+version is `0.2.1` and requires its package release or a local source build.
 
 For an end-to-end installation walkthrough, use the dedicated
 [Setup guide](docs/setup.md). Hermes and OpenClaw users should also apply the
@@ -19,8 +20,10 @@ bounded [read-only agent profiles](docs/agent-profiles.md).
 - a supported local MCP client: Claude Desktop, Claude Code, Codex, or another
   client that can start a stdio server
 
-Browser-only workspaces and Local folders workspaces are not supported. The
-server does not read a browser tab or a folder on your computer.
+Browser-only workspaces and Local folders workspaces are not AuroraCloud MCP
+destinations. By default the server does not read a browser tab or local
+folder. The optional Obsidian importer reads only one explicitly configured
+vault root for analysis and import; it never turns that folder into a workspace.
 
 ## Create an MCP credential
 
@@ -64,6 +67,8 @@ write scope does not imply its read counterpart.
 | Update task metadata after confirmation | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
 | Create or rename non-task objects | `read:objects`, `write:objects` |
 | Replace or append document content | `read:objects`, `read:content`, `write:content` |
+| Design custom types and reusable templates | `read:objects`; add `write:objects` and `write:content` only for an approved apply |
+| Import an authorized Obsidian vault | `read:objects`, `write:objects`, `write:content` |
 
 `read:objects` is the practical baseline because the server verifies workspace
 membership at startup and most tools operate on object metadata. Add
@@ -92,6 +97,8 @@ New client credentials require these environment variables:
 | --- | --- |
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
+| `AURORA_OBSIDIAN_VAULT_ROOT` | optional absolute path authorizing read-only analysis of one Obsidian vault (`0.2.1` source; not yet published) |
+| `AURORA_MCP_STATE_DIR` | optional private import-journal directory outside that vault (`0.2.1` source; not yet published) |
 
 Do not set `AURORA_WORKSPACE_ID` for a client credential. The server discovers
 only its owner-approved grants with `list_workspaces`; each data call then
@@ -173,6 +180,35 @@ The client must launch the process locally and communicate over stdio. Do not
 configure `https://api.auroradocs.eu` as an MCP HTTP/SSE URL; it is the API the
 local server calls, not a hosted MCP endpoint.
 
+## Custom databases and templates — 0.2.1 source
+
+The current source can discover existing object types/templates, offer starter
+recipes for contacts, interests, equipment, subscriptions, and expenses, and
+plan an arbitrary special-purpose schema. Use `plan_custom_database` first,
+review the exact plan ID/hash, then call `apply_custom_database_plan` only after
+approval. Updates are additive: they cannot remove a property, change its value
+type or storage mapping, weaken requiredness, or silently retarget relations.
+
+The `custom_database_design` prompt teaches the same recipe-first,
+plan-before-apply flow. Templates can include a starter body and schema-declared
+defaults, but should never contain real credentials, payment data, or sensitive
+personal records.
+
+## Obsidian vault import — 0.2.1 source
+
+Set `AURORA_OBSIDIAN_VAULT_ROOT` to one absolute local vault path only when you
+want to authorize read-only analysis. Import is a separate action: the server
+first returns a reviewable plan, then asks through MCP form elicitation when the
+client supports it. A compatibility client must wait for a later user message
+and send the exact plan ID/hash with `confirmed: true`. Decline, cancel,
+malformed confirmation, stale source state, missing scopes, viewer access, and
+E2EE all stop before AuroraDocs writes.
+
+Imports run in resume-safe batches, keep a private content-free journal outside
+the vault, and never modify the source. Back up both systems first and start
+with a small test workspace. See [Obsidian import](docs/obsidian-import.md) for
+configuration, mapping, consent, recovery, and fidelity limits.
+
 ## Verify read-only access first
 
 1. Grant the client one workspace with only `read:objects`.
@@ -221,6 +257,7 @@ report a vulnerability, follow [SECURITY.md](SECURITY.md).
 ## Reference
 
 - [Tools and scopes](docs/tools.md)
+- [Obsidian import](docs/obsidian-import.md)
 - [Hermes and OpenClaw agent profiles](docs/agent-profiles.md)
 - [Agent planning and knowledge roadmap](docs/agent-planning-knowledge-roadmap.md)
 - [Security boundaries](docs/security.md)

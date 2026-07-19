@@ -276,6 +276,41 @@ test('packaged setup, tools, security, and troubleshooting cover both credential
   assert.match(tools, /^\| `list_project_changes` \|/m)
 })
 
+test('public docs explain custom databases and the consent-gated local Obsidian boundary', async () => {
+  const [readme, setup, tools, security, troubleshooting, obsidian] = await Promise.all([
+    readFile(new URL('../README.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/setup.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/tools.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/security.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/troubleshooting.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/obsidian-import.md', import.meta.url), 'utf8'),
+  ])
+  const docs = [readme, setup, tools, security, troubleshooting, obsidian].join('\n')
+  for (const text of [
+    'AURORA_OBSIDIAN_VAULT_ROOT',
+    'AURORA_MCP_STATE_DIR',
+    'analyze_obsidian_vault',
+    'import_obsidian_vault',
+    'get_obsidian_import_status',
+    'confirmation_required',
+    'confirmed: true',
+    'never modifies the source vault',
+    'write:objects',
+    'write:content',
+    'E2EE',
+    '0700',
+    '0600',
+  ]) assert.ok(docs.includes(text), `Obsidian documentation is missing: ${text}`)
+
+  for (const tool of [
+    'get_custom_database_recipes', 'plan_custom_database', 'apply_custom_database_plan',
+    'create_template', 'create_from_template',
+  ]) assert.ok(tools.includes(`\`${tool}\``), `Tool reference is missing ${tool}`)
+
+  assert.match(readme, /latest published package is `0\.2\.0`/)
+  assert.match(obsidian, /published npm package remains 0\.2\.0 and does not include these tools yet/)
+})
+
 test('publication audit contains only public-safe repository context', async () => {
   const audit = await readFile(new URL('../PUBLICATION_AUDIT.md', import.meta.url), 'utf8')
   const forbiddenPatterns = [

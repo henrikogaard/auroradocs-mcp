@@ -204,9 +204,16 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
 
     const listed = await client.listTools()
     assert(listed.tools.some((tool) => tool.name === 'get_mcp_tool_coverage'))
+    for (const name of [
+      'list_object_types', 'get_custom_database_recipes', 'plan_custom_database', 'apply_custom_database_plan',
+      'list_templates', 'create_template', 'create_from_template',
+      'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status',
+    ]) assert(listed.tools.some((tool) => tool.name === name), `missing MCP tool ${name}`)
 
     const prompts = await client.listPrompts()
     assert(prompts.prompts.some((prompt) => prompt.name === 'resume_project'))
+    assert(prompts.prompts.some((prompt) => prompt.name === 'custom_database_design'))
+    assert(prompts.prompts.some((prompt) => prompt.name === 'obsidian_import'))
     const prompt = await client.getPrompt({
       name: 'resume_project',
       arguments: { workspace_id: workspaceId, project_id: 'project-test' },
@@ -251,6 +258,15 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
       type: 'error',
       code: 'invalid_input',
       message: 'limit must be an integer between 1 and 50',
+      retryable: false,
+    })
+
+    const disabledObsidian = await client.callTool({ name: 'analyze_obsidian_vault', arguments: {} })
+    assert.equal(disabledObsidian.isError, true)
+    assert.deepEqual(disabledObsidian.structuredContent, {
+      type: 'error',
+      code: 'invalid_input',
+      message: 'AURORA_OBSIDIAN_VAULT_ROOT is required to authorize vault analysis.',
       retryable: false,
     })
 

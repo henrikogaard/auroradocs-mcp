@@ -21,3 +21,8 @@ remediation with the reporter when appropriate.
 
 For the package's security and trust boundaries, see
 [docs/security.md](docs/security.md).
+
+Reports involving the optional local Obsidian importer should identify the
+failed boundary (root confinement, parsing, consent, journal privacy,
+workspace/scopes, E2EE, or attachment upload) without attaching a real vault,
+note body, frontmatter values, local absolute paths, or MCP client transcript.

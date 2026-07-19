@@ -122,7 +122,7 @@ test('legacy mode rejects malformed explicit selectors before reads or mutations
 
 test('every data tool accepts optional workspace selectors while list_workspaces does not', () => {
   const definitions = getToolDefinitions()
-  const excluded = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+  const excluded = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
   for (const tool of definitions) {
     if (excluded.has(tool.name)) {
       assert.equal(tool.inputSchema.properties['workspace_id'], undefined, tool.name)
@@ -146,15 +146,21 @@ test('MCP tool catalog exposes planning and canvas coverage with priorities', ()
   assert.equal(areas.get('canvas')?.status, 'covered')
   assert.deepEqual(areas.get('canvas')?.implementedTools, ['read_canvas'])
   assert.deepEqual(areas.get('canvas')?.missingTools, [])
+  assert.equal(areas.get('obsidian_import')?.status, 'covered')
+  assert.deepEqual(areas.get('obsidian_import')?.implementedTools, [
+    'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status',
+  ])
 })
 
 test('MCP workflow recipes provide usable agent task plans', () => {
   const recipes = getMcpWorkflowRecipes()
   const ids = recipes.map((recipe) => recipe.id)
 
-  assert.deepEqual(ids, ['weekly_summary', 'task_triage', 'research_synthesis', 'source_lookup'])
+  assert.deepEqual(ids, ['weekly_summary', 'task_triage', 'research_synthesis', 'source_lookup', 'custom_database_design', 'obsidian_import'])
   assert.ok(recipes.every((recipe) => recipe.toolSteps.length > 0))
   assert.ok(recipes.find((recipe) => recipe.id === 'task_triage')?.toolSteps.includes('update_task'))
+  assert.ok(recipes.find((recipe) => recipe.id === 'custom_database_design')?.toolSteps.includes('apply_custom_database_plan'))
+  assert.ok(recipes.find((recipe) => recipe.id === 'obsidian_import')?.toolSteps.includes('get_obsidian_import_status'))
 })
 
 test('MCP catalog tools are registered and formatted as read-only results', async () => {
@@ -193,6 +199,18 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
     list_project_changes: 'read',
     get_mcp_tool_coverage: 'read',
     get_mcp_workflow_recipes: 'read',
+    list_object_types: 'read',
+    get_custom_database_recipes: 'read',
+    plan_custom_database: 'read',
+    apply_custom_database_plan: 'write',
+    update_object_type: 'write',
+    list_templates: 'read',
+    create_template: 'write',
+    create_from_template: 'write',
+    analyze_obsidian_vault: 'read',
+    get_obsidian_import_plan: 'read',
+    import_obsidian_vault: 'write',
+    get_obsidian_import_status: 'read',
     create_object: 'write',
     create_task: 'write',
     update_task: 'write',
@@ -211,8 +229,8 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
 })
 
 test('every tool declares output schema and accurate effect annotations', () => {
-  const localReadTools = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
-  const nonIdempotentTools = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block'])
+  const localTools = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'])
+  const nonIdempotentTools = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template'])
   const successResultTypes: Record<string, string[]> = {
     list_workspaces: ['workspaces'],
     search_objects: ['objects'],
@@ -234,6 +252,18 @@ test('every tool declares output schema and accurate effect annotations', () => 
     list_project_changes: ['project_changes', 'project_changes'],
     get_mcp_tool_coverage: ['mcp_tool_coverage'],
     get_mcp_workflow_recipes: ['mcp_workflow_recipes'],
+    list_object_types: ['object_types'],
+    get_custom_database_recipes: ['custom_database_recipes'],
+    plan_custom_database: ['custom_database_plan'],
+    apply_custom_database_plan: ['custom_database_applied'],
+    update_object_type: ['object_type_updated'],
+    list_templates: ['templates'],
+    create_template: ['template_created'],
+    create_from_template: ['template_instantiated'],
+    analyze_obsidian_vault: ['obsidian_import_plan'],
+    get_obsidian_import_plan: ['obsidian_import_plan_page'],
+    import_obsidian_vault: ['obsidian_import_confirmation_required', 'obsidian_import_batch', 'no_op'],
+    get_obsidian_import_status: ['obsidian_import_status'],
     create_object: ['created'],
     create_task: ['task_created'],
     update_task: ['task_updated'],
@@ -257,7 +287,7 @@ test('every tool declares output schema and accurate effect annotations', () => 
     assert.equal(tool.annotations.readOnlyHint, isReadOnly, `${tool.name} readOnlyHint`)
     assert.equal(tool.annotations.destructiveHint, tool.name === 'delete_object', `${tool.name} destructiveHint`)
     assert.equal(tool.annotations.idempotentHint, !nonIdempotentTools.has(tool.name), `${tool.name} idempotentHint`)
-    assert.equal(tool.annotations.openWorldHint, !localReadTools.has(tool.name), `${tool.name} openWorldHint`)
+    assert.equal(tool.annotations.openWorldHint, !localTools.has(tool.name), `${tool.name} openWorldHint`)
 
     const variants = tool.outputSchema.oneOf ?? []
     assert.ok(variants.some((variant) => variant.properties?.['type']?.const === 'error'), `${tool.name} must accept safe errors`)

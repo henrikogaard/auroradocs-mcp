@@ -12,14 +12,15 @@ import {
 import { ToolInputError, toSafeToolError } from './errors.js'
 import {
   getAuroraPromptDefinitions,
+  getAuroraPrompt,
   getAuroraResourceTemplates,
-  getResumeProjectPrompt,
   readAuroraResource,
 } from './mcpSurfaces.js'
 import { executeToolCall, toMcpToolCallResult } from './tools.js'
 import { getToolDefinitions } from './toolCatalog.js'
 import { SERVER_VERSION } from './version.js'
 import type { AuroraConnectionContext } from './contracts.js'
+import { buildObsidianConsentElicitation } from './obsidian/consent.js'
 
 export function createAuroraMcpServer(context: AuroraConnectionContext): Server {
   const server = new Server(
@@ -33,7 +34,15 @@ export function createAuroraMcpServer(context: AuroraConnectionContext): Server 
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params
-    const result = await executeToolCall(name, (args ?? {}) as Record<string, unknown>, context)
+    const formElicitation = server.getClientCapabilities()?.elicitation?.form
+    const result = await executeToolCall(name, (args ?? {}) as Record<string, unknown>, context, {
+      requestObsidianImportConsent: formElicitation
+        ? async (preview) => {
+            const response = await server.elicitInput(buildObsidianConsentElicitation(preview))
+            return { action: response.action, content: response.content }
+          }
+        : undefined,
+    })
     return toMcpToolCallResult(result)
   })
 
@@ -42,11 +51,8 @@ export function createAuroraMcpServer(context: AuroraConnectionContext): Server 
   }))
 
   server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-    if (request.params.name !== 'resume_project') {
-      throw new McpError(ErrorCode.InvalidParams, 'Unknown AuroraDocs prompt')
-    }
     try {
-      return getResumeProjectPrompt(request.params.arguments ?? {})
+      return getAuroraPrompt(request.params.name, request.params.arguments ?? {})
     } catch (error) {
       if (error instanceof ToolInputError) throw new McpError(ErrorCode.InvalidParams, error.message)
       throw error

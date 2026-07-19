@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    {"id":"note-1","type":"file","file":"People/Ada.md","x":0,"y":0,"width":300,"height":180},
+    {"id":"text-1","type":"text","text":"Research contacts","x":360,"y":0,"width":300,"height":180}
+  ],
+  "edges": [
+    {"id":"edge-1","fromNode":"note-1","toNode":"text-1","label":"context"}
+  ]
+}
