@@ -7,6 +7,12 @@
  */
 import type { AuroraConnectionContext, ContentReadResult, GrantedWorkspace } from './contracts.js'
 import { AuroraApiError, ToolInputError, ToolNotFoundError } from './errors.js'
+import type {
+  CustomDatabaseTemplateDefault,
+  ObjectTypeDef,
+  ObjectTypeSchema,
+  PropertyValueType,
+} from './customDatabases.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +45,16 @@ export type AuroraPropertyRecord = {
   value_date: string | null
   value_bool: boolean | null
   value_ref: string | null
+}
+
+export type AuroraTemplateInput = {
+  workspaceId: string
+  objectId?: string
+  type: string
+  title: string
+  icon?: string | null
+  body?: string
+  defaults?: CustomDatabaseTemplateDefault[]
 }
 
 export type AuroraWorkspaceMember = {
@@ -310,16 +326,223 @@ export async function getObject(id: string, workspaceId: string): Promise<Aurora
   }
 }
 
-export async function createObject(workspaceId: string, type: string, title: string): Promise<AuroraObjectRecord> {
+export async function createObject(
+  workspaceId: string,
+  type: string,
+  title: string,
+  options: { id?: string; icon?: string | null; parentId?: string | null; isTemplate?: boolean } = {},
+): Promise<AuroraObjectRecord> {
   const client = getAuroraClient()
   const r = await client.collection('objects').create({
+    ...(options.id ? { id: options.id } : {}),
     workspace_id: workspaceId,
     type,
     title,
+    ...(options.icon !== undefined ? { icon: options.icon ?? '' } : {}),
+    ...(options.parentId !== undefined ? { parent_id: options.parentId ?? '' } : {}),
     is_deleted: false,
-    is_template: false,
+    is_template: options.isTemplate ?? false,
   })
   return mapObject(r)
+}
+
+// ── Custom object types and templates ───────────────────────────────────────
+
+function mapObjectType(record: Record<string, unknown>): ObjectTypeDef {
+  const rawSchema = record['schema']
+  let schema: ObjectTypeSchema[] = []
+  if (Array.isArray(rawSchema)) schema = rawSchema as ObjectTypeSchema[]
+  else if (typeof rawSchema === 'string' && rawSchema.trim()) {
+    const parsed = JSON.parse(rawSchema) as unknown
+    if (!Array.isArray(parsed)) throw new Error('Invalid object type schema response')
+    schema = parsed as ObjectTypeSchema[]
+  }
+  return {
+    id: String(record['id'] ?? ''),
+    workspace_id: String(record['workspace_id'] ?? ''),
+    name: String(record['name'] ?? ''),
+    icon: typeof record['icon'] === 'string' && record['icon'] ? record['icon'] : null,
+    color: typeof record['color'] === 'string' && record['color'] ? record['color'] : null,
+    schema,
+    created_at: String(record['created_at'] ?? record['created'] ?? ''),
+    updated_at: String(record['updated_at'] ?? record['updated'] ?? ''),
+  }
+}
+
+export async function listAuroraObjectTypes(workspaceId: string): Promise<ObjectTypeDef[]> {
+  const client = getAuroraClient()
+  const filter = client.filter('workspace_id = {:wid}', { wid: workspaceId })
+  const output: ObjectTypeDef[] = []
+  for (let page = 1; page <= 2; page += 1) {
+    const response = await client.collection('object_types').listPage({ filter, sort: 'created_at', page, perPage: 50 })
+    const mapped = response.items.map(mapObjectType)
+    if (mapped.some((entry) => entry.workspace_id !== workspaceId)) throw new Error('Object type lookup returned a foreign workspace record')
+    output.push(...mapped)
+    if (!response.totalPages || page >= response.totalPages) break
+  }
+  return output.slice(0, 100)
+}
+
+export async function createAuroraObjectType(
+  workspaceId: string,
+  input: { id: string; name: string; icon: string | null; color: string | null; schema: ObjectTypeSchema[] },
+): Promise<ObjectTypeDef> {
+  const record = await getAuroraClient().collection('object_types').create({
+    id: input.id,
+    workspace_id: workspaceId,
+    name: input.name,
+    icon: input.icon ?? '',
+    color: input.color ?? '',
+    schema: input.schema,
+  })
+  const created = mapObjectType(record)
+  if (created.workspace_id !== workspaceId || created.id !== input.id) throw new Error('Object type writer returned an invalid record')
+  return created
+}
+
+export async function updateAuroraObjectType(
+  workspaceId: string,
+  id: string,
+  changes: { name?: string; icon?: string | null; color?: string | null; schema?: ObjectTypeSchema[] },
+): Promise<ObjectTypeDef> {
+  const client = getAuroraClient()
+  const existing = mapObjectType(await client.collection('object_types').get(id))
+  if (existing.workspace_id !== workspaceId) throw new ToolNotFoundError(`Object type ${id} not found in this workspace`)
+  const body: Record<string, unknown> = {}
+  if (changes.name !== undefined) body['name'] = changes.name
+  if (changes.icon !== undefined) body['icon'] = changes.icon ?? ''
+  if (changes.color !== undefined) body['color'] = changes.color ?? ''
+  if (changes.schema !== undefined) body['schema'] = changes.schema
+  const updated = mapObjectType(await client.collection('object_types').update(id, body))
+  if (updated.workspace_id !== workspaceId || updated.id !== id) throw new Error('Object type writer returned an invalid record')
+  return updated
+}
+
+export async function listAuroraTemplates(workspaceId: string, type?: string): Promise<AuroraObjectRecord[]> {
+  const page = await listObjectsPage(workspaceId, type, 1, 50)
+  return page.items.filter((object) => object.is_template && !object.is_deleted).slice(0, 50)
+}
+
+function propertyValueField(valueType: PropertyValueType): keyof Pick<AuroraPropertyRecord, 'value_text' | 'value_num' | 'value_date' | 'value_bool' | 'value_ref'> {
+  if (valueType === 'number' || valueType === 'progress') return 'value_num'
+  if (valueType === 'date') return 'value_date'
+  if (valueType === 'boolean') return 'value_bool'
+  if (valueType === 'relation' || valueType === 'person' || valueType === 'file') return 'value_ref'
+  return 'value_text'
+}
+
+async function upsertTypedProperty(
+  objectId: string,
+  workspaceId: string,
+  key: string,
+  valueType: PropertyValueType,
+  value: string | number | boolean | null,
+): Promise<void> {
+  const object = await getObject(objectId, workspaceId)
+  if (!object) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
+  if ((valueType === 'relation' || valueType === 'person') && value !== null) {
+    const target = await getObject(String(value), workspaceId)
+    if (!target) throw new ToolInputError(`Template property "${key}" references an object outside this workspace`)
+  }
+  const client = getAuroraClient()
+  const existing = await client.collection('object_properties').listPage({
+    filter: client.filter('object_id = {:oid} && key = {:key}', { oid: objectId, key }),
+    page: 1,
+    perPage: 1,
+  })
+  const fieldName = propertyValueField(valueType)
+  const storedValue = (valueType === 'multi_select' && typeof value === 'string' && !value.startsWith('['))
+    ? JSON.stringify(value.split(',').map((entry) => entry.trim()).filter(Boolean))
+    : value
+  const body = { value_type: valueType, [fieldName]: storedValue }
+  if (existing.items[0]?.['id']) await client.collection('object_properties').update(String(existing.items[0]['id']), body)
+  else await client.collection('object_properties').create({ object_id: objectId, key, ...body })
+}
+
+function plainTextDocument(text: string): Record<string, unknown> {
+  return {
+    type: 'doc',
+    content: text.split('\n').map((line) => ({ type: 'paragraph', content: line ? [{ type: 'text', text: line }] : [] })),
+  }
+}
+
+export async function createAuroraTemplate(input: AuroraTemplateInput): Promise<AuroraObjectRecord> {
+  const title = input.title.trim()
+  if (!title || title.length > 200) throw new ToolInputError('Template title must be 1-200 characters')
+  if ((input.body?.length ?? 0) > 100_000) throw new ToolInputError('Template body is too large')
+  let schema: ObjectTypeSchema[] = []
+  if (input.type.startsWith('custom:')) {
+    const typeId = input.type.slice('custom:'.length)
+    const target = (await listAuroraObjectTypes(input.workspaceId)).find((entry) => entry.id === typeId)
+    if (!target) throw new ToolInputError('Template custom object type does not exist in this workspace')
+    schema = target.schema
+  }
+  const fields = new Map(schema.map((fieldValue) => [fieldValue.key, fieldValue]))
+  for (const value of input.defaults ?? []) {
+    const field = fields.get(value.key)
+    if (input.type.startsWith('custom:') && (!field || field.value_type !== value.valueType)) {
+      throw new ToolInputError(`Template default "${value.key}" is not declared with the matching value type`)
+    }
+  }
+  let object = input.objectId ? await getObject(input.objectId, input.workspaceId) : null
+  if (object && (
+    object.type !== input.type || object.title !== title || object.is_deleted || !object.is_template
+    || (input.icon !== undefined && object.icon !== input.icon)
+  )) {
+    throw new ToolInputError('Planned template ID already belongs to a different object')
+  }
+  object ??= await createObject(input.workspaceId, input.type, title, {
+    id: input.objectId,
+    icon: input.icon,
+    isTemplate: true,
+  })
+  if (!object.is_template) throw new Error('Template writer did not create a template object')
+  if (input.body !== undefined) await setContent(object.id, input.workspaceId, plainTextDocument(input.body))
+  for (const value of input.defaults ?? []) {
+    await upsertTypedProperty(object.id, input.workspaceId, value.key, value.valueType, value.value)
+  }
+  return object
+}
+
+function propertyRecordValue(record: AuroraPropertyRecord): string | number | boolean | null {
+  return record.value_text ?? record.value_num ?? record.value_date ?? record.value_bool ?? record.value_ref
+}
+
+export async function createAuroraObjectFromTemplate(
+  workspaceId: string,
+  templateId: string,
+  objectId?: string,
+): Promise<string> {
+  const template = await getObject(templateId, workspaceId)
+  if (!template || template.is_deleted || !template.is_template) throw new ToolNotFoundError('Template is not available in this workspace')
+  let schema: ObjectTypeSchema[] = []
+  if (template.type.startsWith('custom:')) {
+    const objectType = (await listAuroraObjectTypes(workspaceId)).find((entry) => entry.id === template.type.slice('custom:'.length))
+    if (!objectType) throw new ToolInputError('Template custom object type no longer exists')
+    schema = objectType.schema
+  }
+  const allowedFields = new Map(schema.map((fieldValue) => [fieldValue.key, fieldValue]))
+  const [content, properties] = await Promise.all([
+    getContentJson(templateId, workspaceId),
+    listProperties([templateId], workspaceId),
+  ])
+  let created = objectId ? await getObject(objectId, workspaceId) : null
+  if (created && (
+    created.type !== template.type || created.title !== template.title || created.is_deleted || created.is_template
+  )) throw new ToolInputError('Planned object ID already belongs to a different object')
+  created ??= await createObject(workspaceId, template.type, template.title ?? 'Untitled', {
+    id: objectId,
+    icon: template.icon,
+  })
+  if (content) await setContent(created.id, workspaceId, content)
+  for (const property of properties) {
+    const declared = allowedFields.get(property.key)
+    if (template.type.startsWith('custom:') && (!declared || declared.value_type !== property.value_type)) continue
+    const valueType = property.value_type as PropertyValueType
+    const value = propertyRecordValue(property)
+    if (value !== null) await upsertTypedProperty(created.id, workspaceId, property.key, valueType, value)
+  }
+  return created.id
 }
 
 export async function updateObjectTitle(id: string, title: string, workspaceId: string): Promise<void> {

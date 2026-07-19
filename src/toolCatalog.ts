@@ -82,6 +82,14 @@ const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
   list_project_changes: 'read',
   get_mcp_tool_coverage: 'read',
   get_mcp_workflow_recipes: 'read',
+  list_object_types: 'read',
+  get_custom_database_recipes: 'read',
+  plan_custom_database: 'read',
+  apply_custom_database_plan: 'write',
+  update_object_type: 'write',
+  list_templates: 'read',
+  create_template: 'write',
+  create_from_template: 'write',
   create_object: 'write',
   create_task: 'write',
   update_task: 'write',
@@ -324,6 +332,64 @@ const WORKFLOW_RECIPE_SCHEMA: JsonObjectSchema = {
   additionalProperties: false,
 }
 
+const OBJECT_TYPE_FIELD_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    key: stringSchema,
+    label: stringSchema,
+    value_type: { type: 'string', enum: ['text', 'number', 'progress', 'date', 'boolean', 'relation', 'select', 'multi_select', 'url', 'email', 'phone', 'file', 'person', 'location', 'formula'] },
+    required: { type: 'boolean' },
+    storageType: stringSchema,
+    sensitive: { type: 'boolean' },
+    options: { type: 'array', items: stringSchema },
+    targetType: stringSchema,
+    formula: stringSchema,
+  },
+  required: ['key', 'label', 'value_type', 'required'],
+  additionalProperties: false,
+}
+
+const OBJECT_TYPE_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    id: stringSchema,
+    workspace_id: stringSchema,
+    name: stringSchema,
+    icon: nullableStringSchema,
+    color: nullableStringSchema,
+    schema: { type: 'array', items: OBJECT_TYPE_FIELD_SCHEMA },
+    created_at: stringSchema,
+    updated_at: stringSchema,
+  },
+  required: ['id', 'workspace_id', 'name', 'icon', 'color', 'schema', 'created_at'],
+  additionalProperties: false,
+}
+
+const TEMPLATE_SUMMARY_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: { id: stringSchema, title: nullableStringSchema, type: stringSchema, icon: nullableStringSchema },
+  required: ['id', 'title', 'type', 'icon'],
+  additionalProperties: false,
+}
+
+const CUSTOM_DATABASE_PLAN_SCHEMA: JsonObjectSchema = {
+  type: 'object',
+  properties: {
+    contractVersion: { type: 'integer' }, planId: stringSchema, planHash: stringSchema,
+    workspaceId: stringSchema,
+    source: { type: 'object', additionalProperties: true },
+    name: stringSchema, icon: nullableStringSchema, color: nullableStringSchema,
+    schema: { type: 'array', items: OBJECT_TYPE_FIELD_SCHEMA },
+    template: { type: ['object', 'null'], additionalProperties: true },
+    matches: { type: 'array', items: { type: 'object', additionalProperties: true } },
+    assumptions: { type: 'array', items: stringSchema }, warnings: { type: 'array', items: stringSchema },
+    operation: { type: 'object', additionalProperties: true }, requiresConfirmation: { type: 'boolean' },
+    createdAt: stringSchema, expiresAt: stringSchema,
+  },
+  required: ['contractVersion', 'planId', 'planHash', 'workspaceId', 'source', 'name', 'icon', 'color', 'schema', 'template', 'matches', 'assumptions', 'warnings', 'operation', 'requiresConfirmation', 'createdAt', 'expiresAt'],
+  additionalProperties: false,
+}
+
 const PROJECT_WORKSPACE_SCHEMA: JsonObjectSchema = {
   type: 'object',
   properties: { id: stringSchema, name: stringSchema },
@@ -494,6 +560,17 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
   read_canvas: [resultSchema('canvas', { canvas: CANVAS_SCHEMA }, ['canvas'])],
   get_mcp_tool_coverage: [resultSchema('mcp_tool_coverage', { audit: COVERAGE_AUDIT_SCHEMA }, ['audit'])],
   get_mcp_workflow_recipes: [resultSchema('mcp_workflow_recipes', { recipes: { type: 'array', items: WORKFLOW_RECIPE_SCHEMA } }, ['recipes'])],
+  list_object_types: [resultSchema('object_types', { object_types: { type: 'array', items: OBJECT_TYPE_SCHEMA } }, ['object_types'])],
+  get_custom_database_recipes: [resultSchema('custom_database_recipes', { recipes: { type: 'array', items: { type: 'object', additionalProperties: true } } }, ['recipes'])],
+  plan_custom_database: [resultSchema('custom_database_plan', { plan: CUSTOM_DATABASE_PLAN_SCHEMA, summary: stringSchema }, ['plan', 'summary'])],
+  apply_custom_database_plan: [resultSchema('custom_database_applied', {
+    outcome: { type: 'string', enum: ['created', 'updated', 'reused'] },
+    object_type: OBJECT_TYPE_SCHEMA, template_id: nullableStringSchema, plan_id: stringSchema, plan_hash: stringSchema,
+  }, ['outcome', 'object_type', 'template_id', 'plan_id', 'plan_hash'])],
+  update_object_type: [resultSchema('object_type_updated', { object_type: OBJECT_TYPE_SCHEMA }, ['object_type'])],
+  list_templates: [resultSchema('templates', { templates: { type: 'array', items: TEMPLATE_SUMMARY_SCHEMA } }, ['templates'])],
+  create_template: [resultSchema('template_created', { template: TEMPLATE_SUMMARY_SCHEMA }, ['template'])],
+  create_from_template: [resultSchema('template_instantiated', { template_id: stringSchema, object_id: stringSchema }, ['template_id', 'object_id'])],
   get_project_context: [
     resultSchema('project_context', {
       status: { const: 'ok' },
@@ -557,9 +634,9 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
   delete_object: [resultSchema('deleted', { id: stringSchema }, ['id'])],
 }
 
-const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block'])
-const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
-const WORKSPACE_SELECTOR_FREE_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes'])
+const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template'])
+const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
+const WORKSPACE_SELECTOR_FREE_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
 
 type McpToolDeclaration = Omit<McpToolDefinition, 'title' | 'outputSchema' | 'annotations'>
 
@@ -771,6 +848,101 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
     },
   },
   {
+    name: 'list_object_types',
+    description: 'List existing custom object types and bounded schemas in a granted workspace. Use before planning a custom database.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'get_custom_database_recipes',
+    description: 'List editable starter recipes for contacts, interests, equipment, subscriptions, and expenses. This is local and read-only.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'plan_custom_database',
+    description: 'Create a read-only, expiring custom-database plan after checking existing types. Prefer a recipe when it fits; otherwise provide a name and schema.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        recipe_id: { type: 'string', enum: ['contacts', 'interests', 'equipment', 'subscriptions', 'expenses'], description: 'Optional starter recipe' },
+        name: { type: 'string', description: 'Object type name; defaults to the selected recipe name' },
+        icon: { type: ['string', 'null'], description: 'Optional icon override or null' },
+        color: { type: ['string', 'null'], description: 'Optional color override or null' },
+        schema: { type: 'array', items: OBJECT_TYPE_FIELD_SCHEMA, description: 'Free-form or edited recipe schema, maximum 64 fields' },
+        template: { type: ['object', 'null'], additionalProperties: true, description: 'Optional starter template with title, body, icon, and defaults' },
+        assumptions: { type: 'array', items: stringSchema, description: 'Bounded assumptions to show for approval' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'apply_custom_database_plan',
+    description: 'Apply the exact current custom-database plan after user approval. Requires the plan ID and hash returned by plan_custom_database.',
+    inputSchema: {
+      type: 'object',
+      properties: { plan_id: stringSchema, plan_hash: stringSchema },
+      required: ['plan_id', 'plan_hash'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_object_type',
+    description: 'Apply an additive-only update to a custom object type. Existing fields, value types, requiredness, storage, sensitivity, relation targets, and select options cannot be removed or tightened.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: stringSchema,
+        name: stringSchema,
+        icon: { type: ['string', 'null'] },
+        color: { type: ['string', 'null'] },
+        schema: { type: 'array', items: OBJECT_TYPE_FIELD_SCHEMA },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_templates',
+    description: 'List reusable templates in a granted workspace, optionally filtered by object type.',
+    inputSchema: {
+      type: 'object', properties: { type: stringSchema }, additionalProperties: false,
+    },
+  },
+  {
+    name: 'create_template',
+    description: 'Create a reusable template with optional body content and schema-declared property defaults.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        object_id: { type: 'string', description: 'Optional planned 15-character object ID for idempotent workflows' },
+        type: stringSchema, title: stringSchema, icon: { type: ['string', 'null'] }, body: stringSchema,
+        defaults: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { key: stringSchema, value_type: stringSchema, value: {} },
+            required: ['key', 'value_type', 'value'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['type', 'title'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'create_from_template',
+    description: 'Create a normal object from a workspace template, copying validated content and schema-declared default properties.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        template_id: stringSchema,
+        object_id: { type: 'string', description: 'Optional planned 15-character object ID for resume-safe workflows' },
+      },
+      required: ['template_id'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'create_object',
     description: 'Create a new non-task object (page, note, bookmark, etc.) in the workspace. Use create_task for tasks.',
     inputSchema: {
@@ -936,7 +1108,7 @@ export function getToolEffects(): Readonly<Record<string, McpToolEffect>> {
 
 export function getMcpToolCoverageAudit(): McpToolCoverageAudit {
   return {
-    generatedAt: '2026-07-08',
+    generatedAt: '2026-07-19',
     areas: [
       {
         id: 'knowledge',
@@ -979,6 +1151,13 @@ export function getMcpToolCoverageAudit(): McpToolCoverageAudit {
         implementedTools: ['read_canvas'],
         missingTools: [],
       },
+      {
+        id: 'custom_databases',
+        label: 'Custom object types and reusable templates',
+        status: 'covered',
+        implementedTools: ['list_object_types', 'get_custom_database_recipes', 'plan_custom_database', 'apply_custom_database_plan', 'update_object_type', 'list_templates', 'create_template', 'create_from_template'],
+        missingTools: [],
+      },
     ],
   }
 }
@@ -1016,6 +1195,14 @@ export function getMcpWorkflowRecipes(): McpWorkflowRecipe[] {
       requiredScopes: ['search', 'read:objects'],
       toolSteps: ['search_objects', 'wiki_search', 'wiki_get_page'],
       prompt: 'Search by title and content terms, return the best matching object IDs/deep links, and explain which matched fields support each result.',
+    },
+    {
+      id: 'custom_database_design',
+      title: 'Custom database design',
+      goal: 'Design or safely extend a special-use object type and reusable template after explicit approval.',
+      requiredScopes: ['read:objects', 'write:objects', 'write:content'],
+      toolSteps: ['get_custom_database_recipes', 'list_object_types', 'plan_custom_database', 'apply_custom_database_plan', 'list_templates'],
+      prompt: 'Start from the closest recipe, inspect existing object types, propose an additive plan, show its assumptions and exact hash, then apply it only after the user accepts that plan.',
     },
   ]
 }
