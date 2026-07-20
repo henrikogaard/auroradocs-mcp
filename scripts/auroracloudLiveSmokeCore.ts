@@ -47,7 +47,7 @@ export async function runLiveSmoke(options: LiveSmokeOptions = {}): Promise<void
     : requireLegacyWorkspaceId(env)
 
   const dependencies = await (options.loadDependencies ?? loadRuntimeDependencies)()
-  dependencies.resetAuroraClientForTests()
+  if (env['NODE_ENV'] === 'test') dependencies.resetAuroraClientForTests()
   const context = await dependencies.authenticate({ token, workspaceId: legacyWorkspaceId })
 
   const tools = dependencies.getToolDefinitions()

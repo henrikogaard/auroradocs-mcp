@@ -92,6 +92,16 @@ test('client smoke proves discovery and exits without guessing a project', async
   assert.deepEqual(calls, [{ name: 'list_workspaces', input: {}, context: clientContext }])
 })
 
+test('production live smoke does not call the test-only client reset', async () => {
+  const base = successfulDependencies()
+  let resets = 0
+  base.dependencies.resetAuroraClientForTests = () => { resets += 1 }
+
+  await runLiveSmoke({ env: clientEnv, loadDependencies: async () => base.dependencies, writeOutput() {} })
+
+  assert.equal(resets, 0)
+})
+
 test('legacy smoke uses its configured workspace and supports one explicit project check', async () => {
   const base = successfulDependencies({ async authenticate() { return legacyContext } })
   const env = {

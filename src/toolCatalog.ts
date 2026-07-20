@@ -163,7 +163,7 @@ const KNOWLEDGE_SOURCE_SCHEMA: JsonObjectSchema = {
     snippet: nullableStringSchema,
     plainText: nullableStringSchema,
     blockId: nullableStringSchema,
-    updatedAt: stringSchema,
+    updatedAt: nullableStringSchema,
     score: { type: ['number', 'null'] },
     matchedFields: { type: 'array', items: { type: 'string', enum: ['title', 'content', 'properties', 'relationships'] } },
     availability: { type: 'string', enum: ['available', 'encrypted_locked', 'not_indexed', 'unsupported_type', 'permission_denied'] },

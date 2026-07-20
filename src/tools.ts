@@ -525,7 +525,7 @@ async function executeToolCallUnsafe(
         const typeFilter = input['type'] ? String(input['type']) : undefined
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
         if (!limit.ok) return invalidInput(limit.message)
-        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value)
+        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value, { excludeTemplates: true })
         const results = page.items
           .filter((o) => !o.is_template)
           .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
@@ -536,7 +536,7 @@ async function executeToolCallUnsafe(
         const typeFilter = input['type'] ? String(input['type']) : undefined
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
         if (!limit.ok) return invalidInput(limit.message)
-        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value)
+        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value, { excludeTemplates: true })
         const results = page.items
           .filter((o) => !o.is_template)
           .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))

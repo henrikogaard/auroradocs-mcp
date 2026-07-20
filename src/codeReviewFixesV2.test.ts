@@ -240,7 +240,10 @@ test('update_task clears status when given an empty string', async () => {
   }, async () => {
     const result = await executeToolCall('update_task', { id: 'task-1', status: '' }, 'workspace-1')
     assert.equal(result.type, 'task_updated')
-    assert.deepEqual(patches, [{ id: 'prop-status', body: { value_type: 'text', value_text: null } }])
+    assert.deepEqual(patches, [{
+      id: 'prop-status',
+      body: { value_type: 'text', value_text: null, value_num: null, value_date: null, value_bool: null, value_ref: null },
+    }])
   })
 })
 
@@ -312,7 +315,123 @@ test('listPlanningTasks caps at PLANNING_TASKS_MAX', async () => {
     res.end(JSON.stringify({ error: 'not found' }))
   }, async () => {
     const tasks = await listPlanningTasks('workspace-1')
-    assert.ok(tasks.length <= PLANNING_TASKS_MAX, `expected <= ${PLANNING_TASKS_MAX} tasks, got ${tasks.length}`)
+    assert.equal(tasks.length, PLANNING_TASKS_MAX)
+  })
+})
+
+// ── Follow-up: filter templates before applying object limits ────────────────
+
+test('list_objects and list_recent exclude templates before applying the limit', async () => {
+  const template = { ...OBJECT_RECORD, id: 'template-1', title: 'Template', is_template: true }
+  const normalOne = { ...OBJECT_RECORD, id: 'page-1', title: 'Page one' }
+  const normalTwo = { ...OBJECT_RECORD, id: 'page-2', title: 'Page two' }
+
+  await withServer((_req, res, url) => {
+    if (url.pathname === '/api/collections/objects/records') {
+      const filter = url.searchParams.get('filter') ?? ''
+      const items = filter.includes('is_template = false')
+        ? [normalOne, normalTwo]
+        : [template, normalOne]
+      res.end(JSON.stringify({ items, totalPages: 1, page: 1, perPage: 2, totalItems: items.length }))
+      return
+    }
+    res.statusCode = 404
+    res.end(JSON.stringify({ error: 'not found' }))
+  }, async () => {
+    const listed = await executeToolCall('list_objects', { limit: 2 }, 'workspace-1')
+    const recent = await executeToolCall('list_recent', { limit: 2 }, 'workspace-1')
+    assert.deepEqual((listed as { objects: Array<{ id: string }> }).objects.map((item) => item.id), ['page-1', 'page-2'])
+    assert.deepEqual((recent as { objects: Array<{ id: string }> }).objects.map((item) => item.id), ['page-1', 'page-2'])
+  })
+})
+
+// ── Follow-up: page task properties before upserting ─────────────────────────
+
+test('updateTaskProps pages through existing properties before creating a duplicate', async () => {
+  const writes: Array<{ method: string; id: string | null; body: Record<string, unknown> }> = []
+  await withServer((req, res, url) => {
+    if (req.method === 'GET' && url.pathname === '/api/collections/object_properties/records') {
+      const page = Number(url.searchParams.get('page') ?? '1')
+      const items = page === 1
+        ? Array.from({ length: 50 }, (_, index) => ({ id: `noise-${index}`, object_id: 'task-1', key: `noise-${index}`, value_type: 'text', value_text: 'x' }))
+        : [{ id: 'prop-status', object_id: 'task-1', key: 'status', value_type: 'text', value_text: 'Todo' }]
+      res.end(JSON.stringify({ items, totalPages: 2, page, perPage: 50, totalItems: 51 }))
+      return
+    }
+    if (req.method === 'PATCH' || req.method === 'POST') {
+      let body = ''
+      req.on('data', (chunk) => { body += String(chunk) })
+      req.on('end', () => {
+        writes.push({ method: req.method ?? '', id: url.pathname.split('/').pop() ?? null, body: JSON.parse(body) as Record<string, unknown> })
+        res.end(JSON.stringify({ id: 'prop-status' }))
+      })
+      return
+    }
+    res.statusCode = 404
+    res.end(JSON.stringify({ error: 'not found' }))
+  }, async () => {
+    await updateTaskProps('task-1', 'workspace-1', { status: 'Done' }, { existingObject: TASK_RECORD })
+    assert.deepEqual(writes, [{
+      method: 'PATCH', id: 'prop-status', body: { value_type: 'text', value_text: 'Done' },
+    }])
+  })
+})
+
+test('updateTaskProps clears legacy value_text fallbacks for typed task fields', async () => {
+  const patches: Array<{ id: string; body: Record<string, unknown> }> = []
+  await withServer((req, res, url) => {
+    if (req.method === 'GET' && url.pathname === '/api/collections/object_properties/records') {
+      res.end(JSON.stringify({
+        items: [
+          { id: 'prop-due', object_id: 'task-1', key: 'due_date', value_type: 'date', value_text: '2026-07-15' },
+          { id: 'prop-list', object_id: 'task-1', key: 'task_list_id', value_type: 'ref', value_text: 'list-1' },
+        ],
+        totalPages: 1, page: 1, perPage: 50, totalItems: 2,
+      }))
+      return
+    }
+    if (req.method === 'PATCH') {
+      let body = ''
+      req.on('data', (chunk) => { body += String(chunk) })
+      req.on('end', () => {
+        patches.push({ id: url.pathname.split('/').pop() ?? '', body: JSON.parse(body) as Record<string, unknown> })
+        res.end(JSON.stringify({ id: 'patched' }))
+      })
+      return
+    }
+    res.statusCode = 404
+    res.end(JSON.stringify({ error: 'not found' }))
+  }, async () => {
+    await updateTaskProps('task-1', 'workspace-1', { due_date: null, task_list_id: null }, { existingObject: TASK_RECORD })
+    const emptyFields = { value_text: null, value_num: null, value_date: null, value_bool: null, value_ref: null }
+    assert.deepEqual(patches, [
+      { id: 'prop-due', body: { value_type: 'date', ...emptyFields } },
+      { id: 'prop-list', body: { value_type: 'ref', ...emptyFields } },
+    ])
+  })
+})
+
+test('listPlanningTasks hydrates properties beyond the shared first ten pages', async () => {
+  await withServer((_req, res, url) => {
+    if (url.pathname === '/api/collections/objects/records') {
+      res.end(JSON.stringify({
+        items: [{ ...TASK_RECORD }], totalPages: 1, page: 1, perPage: 50, totalItems: 1,
+      }))
+      return
+    }
+    if (url.pathname === '/api/collections/object_properties/records') {
+      const page = Number(url.searchParams.get('page') ?? '1')
+      const items = page <= 10
+        ? Array.from({ length: 50 }, (_, index) => ({ id: `noise-${page}-${index}`, object_id: 'task-1', key: `noise-${page}-${index}`, value_type: 'text', value_text: 'x' }))
+        : [{ id: 'prop-status', object_id: 'task-1', key: 'status', value_type: 'text', value_text: 'In Progress' }]
+      res.end(JSON.stringify({ items, totalPages: 11, page, perPage: 50, totalItems: 501 }))
+      return
+    }
+    res.statusCode = 404
+    res.end(JSON.stringify({ error: 'not found' }))
+  }, async () => {
+    const tasks = await listPlanningTasks('workspace-1')
+    assert.equal(tasks[0]?.status, 'In Progress')
   })
 })
 
