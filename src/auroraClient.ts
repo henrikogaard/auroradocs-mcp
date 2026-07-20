@@ -294,15 +294,21 @@ export async function listObjectsPage(
   type: string | undefined,
   page: number,
   perPage: number,
+  options: { excludeTemplates?: boolean } = {},
 ): Promise<CollectionPage<AuroraObjectRecord>> {
   if (!Number.isInteger(page) || page < 1) throw new ToolInputError('page must be a positive integer')
   if (!Number.isInteger(perPage) || perPage < 1 || perPage > 50) {
     throw new ToolInputError('perPage must be an integer between 1 and 50')
   }
   const client = getAuroraClient()
-  const filter = type
-    ? client.filter('workspace_id = {:wid} && is_deleted = false && type = {:type}', { wid: workspaceId, type })
-    : client.filter('workspace_id = {:wid} && is_deleted = false', { wid: workspaceId })
+  const filters = ['workspace_id = {:wid}', 'is_deleted = false']
+  const params: Record<string, unknown> = { wid: workspaceId }
+  if (type) {
+    filters.push('type = {:type}')
+    params.type = type
+  }
+  if (options.excludeTemplates) filters.push('is_template = false')
+  const filter = client.filter(filters.join(' && '), params)
   const result = await client.collection('objects').listPage({ filter, sort: '-updated_at', page, perPage })
   return { ...result, items: result.items.map(mapObject) }
 }
@@ -881,8 +887,14 @@ export async function appendContentText(objectId: string, workspaceId: string, t
 
 // ── Properties (parameterized queries) ───────────────────────────────────────
 
-export async function listProperties(objectIds: string[], workspaceId: string): Promise<AuroraPropertyRecord[]> {
+export async function listProperties(
+  objectIds: string[],
+  workspaceId: string,
+  options: { maxPages?: number } = {},
+): Promise<AuroraPropertyRecord[]> {
   if (!objectIds.length) return []
+  const maxPages = options.maxPages ?? 10
+  if (!Number.isInteger(maxPages) || maxPages < 1) throw new ToolInputError('maxPages must be a positive integer')
   const client = getAuroraClient()
   const results: AuroraPropertyRecord[] = []
 
@@ -895,7 +907,7 @@ export async function listProperties(objectIds: string[], workspaceId: string): 
     batch.forEach((id, idx) => { params[`id${idx}`] = id })
     const filter = client.filter(conditions.join(' || '), params)
 
-    for (let page = 1; page <= 10; page += 1) {
+    for (let page = 1; page <= maxPages; page += 1) {
       const records = await client.collection('object_properties').listPage({ filter, page, perPage: 50 })
       for (const r of records.items) {
         results.push({
@@ -911,6 +923,9 @@ export async function listProperties(objectIds: string[], workspaceId: string): 
         })
       }
       if (!records.totalPages || page >= records.totalPages) break
+      if (page === maxPages) {
+        throw new ToolInputError(`Property collection exceeded the ${maxPages}-page safety limit`)
+      }
     }
   }
   return results
@@ -1097,16 +1112,12 @@ export async function updateTaskProps(
   // Batch: fetch all existing properties for this object in one request, then
   // partition by key. This avoids one list request per field (N+1 within a
   // single update_task call).
-  const existing = await client.collection('object_properties').listPage({
-    filter: client.filter('object_id = {:oid}', { oid: objectId }),
-    page: 1,
-    perPage: 50,
-  })
-  const existingByKey = new Map<string, { id: string; record: Record<string, unknown> }>()
-  for (const record of existing.items) {
-    const key = record['key'] as string
+  const existing = await listProperties([objectId], workspaceId, { maxPages: 100 })
+  const existingByKey = new Map<string, string>()
+  for (const record of existing) {
+    const key = record.key
     if (key && !existingByKey.has(key)) {
-      existingByKey.set(key, { id: String(record['id']), record })
+      existingByKey.set(key, record.id)
     }
   }
 
@@ -1118,12 +1129,19 @@ export async function updateTaskProps(
       valueType === 'boolean' ? 'value_bool' :
       valueType === 'ref' ? 'value_ref' :
       'value_text'
-    const existingEntry = existingByKey.get(key)
-    if (existingEntry) {
+    const existingId = existingByKey.get(key)
+    if (existingId) {
       if (isClearing) {
-        await client.collection('object_properties').update(existingEntry.id, { value_type: valueType, [valueField]: null })
+        await client.collection('object_properties').update(existingId, {
+          value_type: valueType,
+          value_text: null,
+          value_num: null,
+          value_date: null,
+          value_bool: null,
+          value_ref: null,
+        })
       } else {
-        await client.collection('object_properties').update(existingEntry.id, { value_type: valueType, [valueField]: value })
+        await client.collection('object_properties').update(existingId, { value_type: valueType, [valueField]: value })
       }
     } else if (!isClearing) {
       await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: value })
@@ -1147,12 +1165,17 @@ export async function listPlanningTasks(workspaceId: string): Promise<AuroraPlan
   // Cap at PLANNING_TASKS_MAX to avoid pulling an unbounded task list + the
   // associated property hydration cost. list_week_plan's description documents
   // this ceiling.
-  const tasks = await listObjects(workspaceId, 'task')
+  const tasks: AuroraObjectRecord[] = []
+  for (let page = 1; tasks.length < PLANNING_TASKS_MAX; page += 1) {
+    const result = await listObjectsPage(workspaceId, 'task', page, 50, { excludeTemplates: true })
+    tasks.push(...result.items)
+    if (!result.totalPages || page >= result.totalPages || result.items.length === 0) break
+  }
   const capped = tasks.slice(0, PLANNING_TASKS_MAX)
   if (!capped.length) return []
   // Batch: fetch all task properties in one batched request instead of N+1.
   const taskIds = capped.map((task) => task.id)
-  const allProps = await listProperties(taskIds, workspaceId)
+  const allProps = await listProperties(taskIds, workspaceId, { maxPages: 100 })
   const propsByObject = new Map<string, AuroraPropertyRecord[]>()
   for (const prop of allProps) {
     const list = propsByObject.get(prop.object_id) ?? []

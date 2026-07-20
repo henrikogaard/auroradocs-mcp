@@ -357,6 +357,17 @@ test('MCP tool catalog declares bounded integer schemas for count inputs', () =>
   }
 })
 
+test('knowledge source output schemas allow an unknown updatedAt', () => {
+  const definition = getToolDefinitions().find((tool) => tool.name === 'wiki_search')
+  assert(definition)
+  const knowledgeVariant = definition.outputSchema.oneOf?.find(
+    (variant) => variant.properties?.['type']?.const === 'knowledge_sources',
+  )
+  assert(knowledgeVariant)
+  const sourceSchema = knowledgeVariant.properties?.['sources'] as { items?: { properties?: Record<string, unknown> } }
+  assert.deepEqual(sourceSchema.items?.properties?.['updatedAt'], { type: ['string', 'null'] })
+})
+
 test('get_project_context does not publish a continuation cursor input', () => {
   const definition = getToolDefinitions().find((tool) => tool.name === 'get_project_context')
   assert(definition)

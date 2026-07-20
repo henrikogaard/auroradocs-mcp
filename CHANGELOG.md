@@ -60,6 +60,11 @@ All notable changes to this project are documented in this file.
 - Kept inferred frontmatter values out of persisted schemas, validated merged
   schemas before approval, held Canvas content until every referenced attachment
   completed, and returned an actionable stale-plan error after restart drift.
+- Paged task properties and planning tasks across bounded collection pages,
+  filtered templates before applying list limits, and cleared legacy property
+  fallback columns when task fields are reset.
+- Allowed knowledge results with unknown timestamps to satisfy their published
+  output schema and kept the production live-smoke command usable outside tests.
 
 ### Security
 
