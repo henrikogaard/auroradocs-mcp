@@ -8,6 +8,26 @@ with `list_workspaces`; every workspace data call then selects one grant with
 `workspace_id` or an unambiguous `workspace_alias`. A legacy `aur_mcp_` token
 is pinned to its configured `AURORA_WORKSPACE_ID`.
 
+Agents should start with the [Agent guide](agent-guide.md) for capability
+selection, read/write boundaries, structured-result handling, citations, and
+the approval-gated custom-database and Obsidian workflows.
+
+## Prompts, resources, and completions
+
+The server advertises MCP argument completions for prompt and resource-template
+arguments. Supported suggestions include granted workspace IDs/aliases,
+project IDs/titles, custom-database recipe IDs, existing object-type IDs/names,
+and template IDs/titles. Dynamic suggestions require a previously resolved
+workspace argument in completion context and never cross workspace grants.
+Results are filtered and capped at 100 values.
+When a bounded backend page is not exhaustive, the completion sets `hasMore`
+and omits an unknowable exact total so the client can ask the user to narrow the
+typed fragment.
+
+The protocol does not define completion requests for raw tool input schemas.
+Direct tool callers should use `list_workspaces`, `list_object_types`,
+`list_templates`, and bounded project discovery instead.
+
 ## Scope catalog
 
 | Scope | Permission |
@@ -82,11 +102,17 @@ including object lookup and startup membership verification.
 | `append_block` | Append plain-text paragraphs to an object. | `read:objects`, `read:content`, `write:content` |
 | `set_property` | Set a generic object property. | `read:objects`, `write:objects` |
 | `delete_object` | Soft-delete an object to trash. | `read:objects`, `write:objects` |
+| `restore_object` | Restore a soft-deleted object; reports whether the state changed. | `read:objects`, `write:objects` |
 
 ## Safer workflow recipes
 
 Start read-only and ask the client to show its proposed changes before granting
 write access.
+
+`get_mcp_workflow_recipes` returns machine-readable `approvalMode`,
+`writeBoundary`, `stopConditions`, and `expectedResultTypes` fields alongside
+scopes, ordered tools, goals, and prompt text. Agents should treat those fields
+as execution constraints, not suggestions.
 
 | Workflow | Scopes | Suggested first request |
 | --- | --- | --- |
@@ -96,11 +122,14 @@ write access.
 | Task triage | `read:objects`, `read:tasks` | "Propose task field updates but do not apply them." |
 | Confirmed task edits | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` | "Apply only the task changes I explicitly approve." |
 | Custom database design | `read:objects` first; add `write:objects` / `write:content` for apply | "Use the closest recipe, show the exact additive plan, and wait for my approval before applying it." |
+| Template instantiation | `read:objects`; add `write:objects`, `write:content` for creation | "Resolve one template, show its exact ID and optional planned object ID, and wait for approval before creating." |
 | Obsidian dry run | `read:objects` plus local vault authorization | "Analyze the configured vault, show the plan and warnings, and do not import." |
 | Approved Obsidian import | `read:objects`, `write:objects`, `write:content` | "After my later acceptance, import bounded batches with this exact plan ID/hash and report status." |
 
 `delete_object` is a write operation even though AuroraDocs uses reversible
 soft deletion. Treat it as destructive from the client's point of view.
+Use `restore_object` for an explicitly identified trashed object; repeated calls
+are safe and report `changed: false` when the object is already active.
 
 The Obsidian compatibility `confirmed: true` field is a two-turn signal for
 clients without MCP form elicitation, not cryptographic proof. Native client

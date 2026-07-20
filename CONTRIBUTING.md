@@ -63,5 +63,15 @@ verification performed, and call out skipped checks or known limitations.
 Documentation changes should work for readers who have no access to the
 AuroraDocs monorepo or private project context.
 
+## Releases
+
+`package.json` is the release-version source of truth. Before pushing a release
+tag, update the changelog plus README published-version wording and pinned
+installation examples in the same release commit. Push only `vX.Y.Z` matching
+the package version. The release workflow verifies that match, runs the full
+check, publishes the same version to npm with provenance when needed, and
+creates the GitHub Release from that exact tag. Do not publish or relabel only
+one of those public artifacts.
+
 By submitting a contribution, you agree that it is licensed under the Apache
 License 2.0 according to this repository's [LICENSE](LICENSE).

@@ -7,6 +7,7 @@ const REQUIRED_PATHS = [
   'NOTICE',
   'docs/setup.md',
   'docs/agent-profiles.md',
+  'docs/agent-guide.md',
   'dist/index.js',
   'dist/version.js',
 ]

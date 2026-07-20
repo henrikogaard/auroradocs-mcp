@@ -9,8 +9,9 @@ The public package is `@henrikogard/auroradocs-mcp` and the executable is
 version is `0.2.1` and requires its package release or a local source build.
 
 For an end-to-end installation walkthrough, use the dedicated
-[Setup guide](docs/setup.md). Hermes and OpenClaw users should also apply the
-bounded [read-only agent profiles](docs/agent-profiles.md).
+[Setup guide](docs/setup.md). AI assistants and client integrators should start
+with the [Agent guide](docs/agent-guide.md); Hermes and OpenClaw users should
+also apply the bounded [read-only agent profiles](docs/agent-profiles.md).
 
 ## Requirements
 
@@ -180,6 +181,19 @@ The client must launch the process locally and communicate over stdio. Do not
 configure `https://api.auroradocs.eu` as an MCP HTTP/SSE URL; it is the API the
 local server calls, not a hosted MCP endpoint.
 
+## Agent discovery and recovery — 0.2.1 source
+
+The server sends initialization instructions, exposes machine-readable workflow
+recipes with approval/write/stop/result contracts, and advertises MCP
+completions for authorized workspace, project, object-type, recipe, and template
+prompt/resource arguments. The `template_instantiation` prompt guides an exact
+template selection before creation. `restore_object` recovers an explicitly
+identified soft-deleted object and safely reports when it was already active.
+
+MCP completions apply to prompt and resource-template arguments; direct tool
+inputs continue to use the bounded discovery tools documented in the
+[Agent guide](docs/agent-guide.md).
+
 ## Custom databases and templates — 0.2.1 source
 
 The current source can discover existing object types/templates, offer starter
@@ -261,6 +275,7 @@ report a vulnerability, follow [SECURITY.md](SECURITY.md).
 
 ## Reference
 
+- [Agent guide](docs/agent-guide.md)
 - [Tools and scopes](docs/tools.md)
 - [Obsidian import](docs/obsidian-import.md)
 - [Hermes and OpenClaw agent profiles](docs/agent-profiles.md)

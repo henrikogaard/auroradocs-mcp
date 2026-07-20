@@ -140,6 +140,9 @@ test('MCP tool catalog exposes planning and canvas coverage with priorities', ()
 
   assert.equal(areas.get('knowledge')?.status, 'covered')
   assert.equal(areas.get('tasks')?.status, 'covered')
+  assert.equal(areas.get('objects')?.status, 'covered')
+  assert.ok(areas.get('objects')?.implementedTools.includes('restore_object'))
+  assert.deepEqual(areas.get('objects')?.missingTools, [])
   assert.equal(areas.get('calendar')?.status, 'covered')
   assert.deepEqual(areas.get('calendar')?.implementedTools, ['list_week_plan', 'schedule_task_block'])
   assert.deepEqual(areas.get('calendar')?.missingTools, [])
@@ -156,11 +159,21 @@ test('MCP workflow recipes provide usable agent task plans', () => {
   const recipes = getMcpWorkflowRecipes()
   const ids = recipes.map((recipe) => recipe.id)
 
-  assert.deepEqual(ids, ['weekly_summary', 'task_triage', 'research_synthesis', 'source_lookup', 'custom_database_design', 'obsidian_import'])
+  assert.deepEqual(ids, ['weekly_summary', 'task_triage', 'research_synthesis', 'source_lookup', 'custom_database_design', 'template_instantiation', 'obsidian_import'])
   assert.ok(recipes.every((recipe) => recipe.toolSteps.length > 0))
   assert.ok(recipes.find((recipe) => recipe.id === 'task_triage')?.toolSteps.includes('update_task'))
   assert.ok(recipes.find((recipe) => recipe.id === 'custom_database_design')?.toolSteps.includes('apply_custom_database_plan'))
   assert.ok(recipes.find((recipe) => recipe.id === 'obsidian_import')?.toolSteps.includes('get_obsidian_import_status'))
+  assert.ok(recipes.every((recipe) => recipe.expectedResultTypes.length > 0))
+  assert.ok(recipes.every((recipe) => recipe.stopConditions.length > 0))
+  assert.ok(recipes.every((recipe) => recipe.writeBoundary.rule.length > 0))
+  assert.deepEqual(recipes.find((recipe) => recipe.id === 'weekly_summary')?.writeBoundary.allowedTools, [])
+  assert.equal(recipes.find((recipe) => recipe.id === 'task_triage')?.approvalMode, 'confirm_each_write')
+  assert.deepEqual(recipes.find((recipe) => recipe.id === 'task_triage')?.writeBoundary.allowedTools, ['update_task'])
+  assert.equal(recipes.find((recipe) => recipe.id === 'custom_database_design')?.approvalMode, 'approve_exact_plan')
+  assert.deepEqual(recipes.find((recipe) => recipe.id === 'template_instantiation')?.writeBoundary.allowedTools, ['create_from_template'])
+  assert.equal(recipes.find((recipe) => recipe.id === 'obsidian_import')?.approvalMode, 'later_explicit_consent')
+  assert.ok(recipes.find((recipe) => recipe.id === 'obsidian_import')?.expectedResultTypes.includes('obsidian_import_status'))
 })
 
 test('MCP catalog tools are registered and formatted as read-only results', async () => {
@@ -220,6 +233,7 @@ test('MCP tool catalog authoritatively classifies every registered tool effect',
     append_block: 'write',
     set_property: 'write',
     delete_object: 'write',
+    restore_object: 'write',
   } as const
   const toolNames = getToolDefinitions().map((tool) => tool.name).sort()
 
@@ -273,6 +287,7 @@ test('every tool declares output schema and accurate effect annotations', () => 
     append_block: ['content_appended'],
     set_property: ['property_set'],
     delete_object: ['deleted'],
+    restore_object: ['restored'],
   }
 
   for (const tool of getToolDefinitions()) {
@@ -676,6 +691,7 @@ test('write tools classify missing objects as not found', async () => {
       ['set_content', { id: 'missing-1', text: 'New content' }],
       ['append_block', { id: 'missing-1', text: 'Appended content' }],
       ['delete_object', { id: 'missing-1' }],
+      ['restore_object', { id: 'missing-1' }],
       ['set_property', { object_id: 'missing-1', key: 'status', value: 'Todo' }],
     ]
 

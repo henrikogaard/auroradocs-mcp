@@ -36,6 +36,7 @@ export type McpToolDefinition = {
 export type McpCoveragePriority = 'high' | 'medium' | 'low'
 export type McpCoverageStatus = 'covered' | 'partial' | 'gap'
 export type McpToolEffect = 'read' | 'write'
+export type McpWorkflowApprovalMode = 'none' | 'confirm_each_write' | 'approve_exact_plan' | 'later_explicit_consent'
 
 export type McpToolCoverageAudit = {
   generatedAt: string
@@ -58,6 +59,10 @@ export type McpWorkflowRecipe = {
   goal: string
   requiredScopes: string[]
   toolSteps: string[]
+  approvalMode: McpWorkflowApprovalMode
+  writeBoundary: { allowedTools: string[]; rule: string }
+  stopConditions: string[]
+  expectedResultTypes: string[]
   prompt: string
 }
 
@@ -103,6 +108,7 @@ const TOOL_EFFECTS: Readonly<Record<string, McpToolEffect>> = {
   append_block: 'write',
   set_property: 'write',
   delete_object: 'write',
+  restore_object: 'write',
 }
 
 const stringSchema: JsonSchema = { type: 'string' }
@@ -330,9 +336,24 @@ const WORKFLOW_RECIPE_SCHEMA: JsonObjectSchema = {
     goal: stringSchema,
     requiredScopes: { type: 'array', items: stringSchema },
     toolSteps: { type: 'array', items: stringSchema },
+    approvalMode: { type: 'string', enum: ['none', 'confirm_each_write', 'approve_exact_plan', 'later_explicit_consent'] },
+    writeBoundary: {
+      type: 'object',
+      properties: {
+        allowedTools: { type: 'array', items: stringSchema },
+        rule: stringSchema,
+      },
+      required: ['allowedTools', 'rule'],
+      additionalProperties: false,
+    },
+    stopConditions: { type: 'array', items: stringSchema },
+    expectedResultTypes: { type: 'array', items: stringSchema },
     prompt: stringSchema,
   },
-  required: ['id', 'title', 'goal', 'requiredScopes', 'toolSteps', 'prompt'],
+  required: [
+    'id', 'title', 'goal', 'requiredScopes', 'toolSteps', 'approvalMode',
+    'writeBoundary', 'stopConditions', 'expectedResultTypes', 'prompt',
+  ],
   additionalProperties: false,
 }
 
@@ -727,6 +748,7 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
     value: stringSchema,
   }, ['objectId', 'key', 'value'])],
   delete_object: [resultSchema('deleted', { id: stringSchema }, ['id'])],
+  restore_object: [resultSchema('restored', { id: stringSchema, changed: { type: 'boolean' } }, ['id', 'changed'])],
 }
 
 const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template', 'import_obsidian_vault'])
@@ -1231,6 +1253,18 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
       required: ['id'],
     },
   },
+  {
+    name: 'restore_object',
+    description: 'Restore one soft-deleted object from trash. Returns changed=false when the object is already active.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The soft-deleted object ID to restore' },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+  },
 ]
 
 export function getToolDefinitions(): McpToolDefinition[] {
@@ -1272,7 +1306,7 @@ export function getToolEffects(): Readonly<Record<string, McpToolEffect>> {
 
 export function getMcpToolCoverageAudit(): McpToolCoverageAudit {
   return {
-    generatedAt: '2026-07-19',
+    generatedAt: '2026-07-20',
     areas: [
       {
         id: 'knowledge',
@@ -1291,15 +1325,9 @@ export function getMcpToolCoverageAudit(): McpToolCoverageAudit {
       {
         id: 'objects',
         label: 'Object CRUD',
-        status: 'partial',
-        implementedTools: ['search_objects', 'list_objects', 'list_recent', 'create_object', 'update_object', 'append_block', 'delete_object'],
-        missingTools: [
-          {
-            name: 'restore_object',
-            priority: 'low',
-            reason: 'Deletes are reversible in the app, but MCP currently lacks an explicit trash restore command.',
-          },
-        ],
+        status: 'covered',
+        implementedTools: ['search_objects', 'list_objects', 'list_recent', 'create_object', 'update_object', 'append_block', 'delete_object', 'restore_object'],
+        missingTools: [],
       },
       {
         id: 'calendar',
@@ -1339,16 +1367,24 @@ export function getMcpWorkflowRecipes(): McpWorkflowRecipe[] {
       id: 'weekly_summary',
       title: 'Weekly summary',
       goal: 'Summarize recent workspace changes and outstanding work for a weekly review.',
-      requiredScopes: ['search', 'read:objects', 'read:content', 'tasks'],
+      requiredScopes: ['search', 'read:objects', 'read:content', 'read:tasks'],
       toolSteps: ['wiki_recent', 'wiki_search', 'list_task_statuses', 'list_objects'],
+      approvalMode: 'none',
+      writeBoundary: { allowedTools: [], rule: 'Read-only workflow; never call a write tool.' },
+      stopConditions: ['Stop when required read data is unavailable or a read returns an error; report the unavailable section.'],
+      expectedResultTypes: ['knowledge_sources', 'task_statuses', 'objects'],
       prompt: 'Review recent sources, search for this week or active project terms, then summarize completed work, open decisions, and next actions with citations.',
     },
     {
       id: 'task_triage',
       title: 'Task triage',
       goal: 'Review unsorted or stale tasks and propose status, priority, list, or assignee updates.',
-      requiredScopes: ['read:objects', 'tasks', 'write:objects'],
+      requiredScopes: ['read:objects', 'read:tasks', 'write:tasks', 'write:objects'],
       toolSteps: ['list_task_lists', 'list_task_statuses', 'list_objects', 'get_object', 'update_task'],
+      approvalMode: 'confirm_each_write',
+      writeBoundary: { allowedTools: ['update_task'], rule: 'Apply only the exact task fields the user confirms.' },
+      stopConditions: ['Stop on an ambiguous task, user decline, permission denial, or any failed prerequisite read.'],
+      expectedResultTypes: ['task_lists', 'task_statuses', 'objects', 'object', 'task_updated'],
       prompt: 'List task objects, inspect unclear items, then update only fields the user explicitly confirms or that match the agreed triage rule.',
     },
     {
@@ -1357,6 +1393,10 @@ export function getMcpWorkflowRecipes(): McpWorkflowRecipe[] {
       goal: 'Find relevant project sources and produce a citation-backed synthesis.',
       requiredScopes: ['search', 'read:objects', 'read:content'],
       toolSteps: ['wiki_search', 'wiki_get_page', 'wiki_related'],
+      approvalMode: 'none',
+      writeBoundary: { allowedTools: [], rule: 'Read-only workflow; never call a write tool.' },
+      stopConditions: ['Stop when sources are unavailable or insufficient; report uncertainty instead of inventing an answer.'],
+      expectedResultTypes: ['knowledge_sources'],
       prompt: 'Search for the topic, read the top sources, follow related items, then answer with citations and a separate uncertainty list.',
     },
     {
@@ -1365,6 +1405,10 @@ export function getMcpWorkflowRecipes(): McpWorkflowRecipe[] {
       goal: 'Locate the source object behind a claim, task, or project reference.',
       requiredScopes: ['search', 'read:objects'],
       toolSteps: ['search_objects', 'wiki_search', 'wiki_get_page'],
+      approvalMode: 'none',
+      writeBoundary: { allowedTools: [], rule: 'Read-only workflow; never call a write tool.' },
+      stopConditions: ['Stop when no unambiguous source is found; return candidates and uncertainty.'],
+      expectedResultTypes: ['objects', 'knowledge_sources'],
       prompt: 'Search by title and content terms, return the best matching object IDs/deep links, and explain which matched fields support each result.',
     },
     {
@@ -1373,7 +1417,23 @@ export function getMcpWorkflowRecipes(): McpWorkflowRecipe[] {
       goal: 'Design or safely extend a special-use object type and reusable template after explicit approval.',
       requiredScopes: ['read:objects', 'write:objects', 'write:content'],
       toolSteps: ['get_custom_database_recipes', 'list_object_types', 'plan_custom_database', 'apply_custom_database_plan', 'list_templates'],
+      approvalMode: 'approve_exact_plan',
+      writeBoundary: { allowedTools: ['apply_custom_database_plan'], rule: 'Apply only the exact unexpired plan ID and hash the user approved.' },
+      stopConditions: ['Stop before apply on missing approval, plan drift, expiry, destructive schema change, permission denial, or failed prerequisite.'],
+      expectedResultTypes: ['custom_database_recipes', 'object_types', 'custom_database_plan', 'custom_database_applied', 'templates'],
       prompt: 'Start from the closest recipe, inspect existing object types, propose an additive plan, show its assumptions and exact hash, then apply it only after the user accepts that plan.',
+    },
+    {
+      id: 'template_instantiation',
+      title: 'Template instantiation',
+      goal: 'Resolve one reusable template and create an object with its approved defaults and content.',
+      requiredScopes: ['read:objects', 'write:objects', 'write:content'],
+      toolSteps: ['list_templates', 'create_from_template'],
+      approvalMode: 'confirm_each_write',
+      writeBoundary: { allowedTools: ['create_from_template'], rule: 'Create one object only from the exact template and optional planned object ID the user approves.' },
+      stopConditions: ['Stop on a missing or ambiguous template, changed planned identity, user decline, permission denial, or failed prerequisite read.'],
+      expectedResultTypes: ['templates', 'template_instantiated'],
+      prompt: 'List templates, resolve the requested selector unambiguously, show the exact template and optional planned object ID, then create one object only after explicit user approval.',
     },
     {
       id: 'obsidian_import',
@@ -1381,6 +1441,10 @@ export function getMcpWorkflowRecipes(): McpWorkflowRecipe[] {
       goal: 'Analyze one locally authorized vault, review its mapping, obtain explicit later consent, and resume bounded additive import batches.',
       requiredScopes: ['read:objects', 'write:objects', 'write:content'],
       toolSteps: ['analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'],
+      approvalMode: 'later_explicit_consent',
+      writeBoundary: { allowedTools: ['import_obsidian_vault'], rule: 'Import only after a later explicit acceptance of the exact plan ID and hash; serialize bounded batches.' },
+      stopConditions: ['Stop on decline, cancellation, stale or expired plan, source drift, missing scope, viewer role, E2EE, quota, storage failure, or blocked status.'],
+      expectedResultTypes: ['obsidian_import_plan', 'obsidian_import_plan_page', 'obsidian_import_confirmation_required', 'obsidian_import_batch', 'obsidian_import_status', 'no_op'],
       prompt: 'Analyze first without writes, present the exact plan and wait for a later acceptance, then import bounded batches with the exact plan ID/hash until status is complete or blocked. Never modify the source vault.',
     },
   ]

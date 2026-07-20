@@ -18,6 +18,7 @@ import {
   createObject,
   updateObjectTitle,
   deleteObject,
+  restoreObject,
   upsertProperty,
   getTaskProps,
   updateTaskProps,
@@ -105,6 +106,7 @@ export type ToolResult =
   | { type: 'object_updated'; id: string; changed_fields: string[] }
   | { type: 'updated'; id: string; title: string }
   | { type: 'deleted'; id: string }
+  | { type: 'restored'; id: string; changed: boolean }
   | { type: 'content_set'; id: string }
   | { type: 'content_appended'; id: string }
   | { type: 'property_set'; objectId: string; key: string; value: string }
@@ -1075,6 +1077,12 @@ async function executeToolCallUnsafe(
         return { type: 'deleted', id }
       }
 
+      case 'restore_object': {
+        const id = readString(input['id'])
+        if (!id) return invalidInput('Object ID is required')
+        return { type: 'restored', id, changed: await restoreObject(id, workspaceId) }
+      }
+
       case 'set_property': {
         const objectId = String(input['object_id'] ?? '')
         const key = String(input['key'] ?? '')
@@ -1250,6 +1258,10 @@ export function formatToolResult(result: ToolResult): string {
         recipe.goal,
         `Scopes: ${recipe.requiredScopes.join(', ')}`,
         `Tools: ${recipe.toolSteps.join(' -> ')}`,
+        `Approval: ${recipe.approvalMode}`,
+        `Write boundary: ${recipe.writeBoundary.allowedTools.join(', ') || 'none'} — ${recipe.writeBoundary.rule}`,
+        `Stop conditions: ${recipe.stopConditions.join(' | ')}`,
+        `Expected result types: ${recipe.expectedResultTypes.join(', ')}`,
         `Prompt: ${recipe.prompt}`,
       ].join('\n')).join('\n\n')
     case 'object_types':
@@ -1351,6 +1363,10 @@ export function formatToolResult(result: ToolResult): string {
       return result.task_lists.map((l) => `- ${l.name} (${l.id})`).join('\n')
     case 'task_statuses':
       return result.statuses.join(', ')
+    case 'restored':
+      return result.changed
+        ? `Restored object ${result.id} from trash.`
+        : `Object ${result.id} is already active; no change was needed.`
     case 'project_context': {
       const header = [
         `Workspace: ${result.workspace.name} (${result.workspace.id})`,

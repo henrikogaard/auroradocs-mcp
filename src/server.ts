@@ -1,6 +1,7 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import {
   CallToolRequestSchema,
+  CompleteRequestSchema,
   ErrorCode,
   GetPromptRequestSchema,
   ListPromptsRequestSchema,
@@ -14,6 +15,8 @@ import {
   getAuroraPromptDefinitions,
   getAuroraPrompt,
   getAuroraResourceTemplates,
+  getAuroraServerInstructions,
+  completeAuroraArgument,
   readAuroraResource,
 } from './mcpSurfaces.js'
 import { executeToolCall, toMcpToolCallResult } from './tools.js'
@@ -25,12 +28,24 @@ import { buildObsidianConsentElicitation } from './obsidian/consent.js'
 export function createAuroraMcpServer(context: AuroraConnectionContext): Server {
   const server = new Server(
     { name: 'auroradocs-mcp', version: SERVER_VERSION },
-    { capabilities: { tools: {}, prompts: {}, resources: {} } },
+    {
+      capabilities: { tools: {}, prompts: {}, resources: {}, completions: {} },
+      instructions: getAuroraServerInstructions(),
+    },
   )
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: getToolDefinitions(),
   }))
+
+  server.setRequestHandler(CompleteRequestSchema, async (request) => {
+    try {
+      return await completeAuroraArgument(request.params, context)
+    } catch (error) {
+      if (error instanceof ToolInputError) throw new McpError(ErrorCode.InvalidParams, error.message)
+      throw new McpError(ErrorCode.InternalError, toSafeToolError(error).message)
+    }
+  })
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params

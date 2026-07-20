@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-20
+
+### Added
+
+- Added additive custom object-type and reusable-template tools, including
+  starter recipes for contacts, interests, equipment, subscriptions, and
+  expenses plus arbitrary reviewable schemas.
+- Added a local, analyze-first Obsidian vault importer with safe YAML/Markdown
+  and JSON Canvas conversion, wiki-link and attachment mapping, bounded plans,
+  explicit MCP elicitation or two-turn compatibility consent, resumable batches
+  with stable destination IDs and idempotent attachment uploads, and content-free
+  private journals.
+- Added `custom_database_design` and `obsidian_import` prompts plus coverage and
+  workflow-recipe guidance for agents.
+- Added MCP prompt/resource argument completions for authorized workspaces,
+  projects, custom-database recipes/object types, and templates, plus the
+  approval-gated `template_instantiation` prompt.
+- Added idempotent `restore_object` support for recovering soft-deleted objects
+  with an explicit changed/already-active result.
+
+### Changed
+
+- Added MCP initialization instructions and a packaged agent guide covering
+  capability discovery, explicit workspace selection, structured results,
+  citations, read-before-write behavior, exact-plan approval, and untrusted
+  workspace/vault content.
+- Enriched machine-readable workflow recipes with approval mode, allowed write
+  tools/rules, stop conditions, expected structured result types, and current
+  split task scopes.
+- Documented and contract-tested the release gate that requires a package/tag
+  version match and creates the npm package and GitHub Release from the same
+  tag.
+
 ### Fixed
 
 - Hardened Obsidian import prerequisites and recovery: failed custom types or
@@ -27,21 +60,6 @@ All notable changes to this project are documented in this file.
 - Kept inferred frontmatter values out of persisted schemas, validated merged
   schemas before approval, held Canvas content until every referenced attachment
   completed, and returned an actionable stale-plan error after restart drift.
-
-## [0.2.1] - 2026-07-20
-
-### Added
-
-- Added additive custom object-type and reusable-template tools, including
-  starter recipes for contacts, interests, equipment, subscriptions, and
-  expenses plus arbitrary reviewable schemas.
-- Added a local, analyze-first Obsidian vault importer with safe YAML/Markdown
-  and JSON Canvas conversion, wiki-link and attachment mapping, bounded plans,
-  explicit MCP elicitation or two-turn compatibility consent, resumable batches
-  with stable destination IDs and idempotent attachment uploads, and content-free
-  private journals.
-- Added `custom_database_design` and `obsidian_import` prompts plus coverage and
-  workflow-recipe guidance for agents.
 
 ### Security
 
