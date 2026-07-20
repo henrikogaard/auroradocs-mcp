@@ -5,9 +5,8 @@ MCP server. The server also sends a shorter version as MCP initialization
 instructions, so compatible clients receive the core workspace, approval,
 citation, and untrusted-content rules when they connect.
 
-The guide describes the current `0.2.1` source. The latest published npm
-package remains `0.2.0`; custom-database, template, Obsidian, and initialization
-instruction support require a local source build until `0.2.1` is released.
+This guide describes the published `0.2.1` package, including custom-database,
+template, Obsidian, and initialization-instruction support.
 
 ## Start every session safely
 
