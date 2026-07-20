@@ -22,6 +22,7 @@ import {
   upsertProperty,
   getTaskProps,
   updateTaskProps,
+  getObjectE2eeStatus,
   getWorkspaceKnowledgeObjectServer,
   listWorkspaceRecentKnowledgeServer,
   listWorkspaceRelatedKnowledgeServer,
@@ -161,6 +162,19 @@ function readStringArray(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((v) => String(v).trim()).filter(Boolean)
   if (typeof value === 'string') return value.split(',').map((v) => v.trim()).filter(Boolean)
   return []
+}
+
+function normalizeValueType(value: string): string | null {
+  const v = value.toLowerCase()
+  if (v === 'text' || v === 'date' || v === 'number' || v === 'boolean') return v
+  return null
+}
+
+function parseBooleanValue(value: string): boolean | null {
+  const v = value.trim().toLowerCase()
+  if (v === 'true' || v === '1' || v === 'yes') return true
+  if (v === 'false' || v === '0' || v === 'no') return false
+  return null
 }
 
 function invalidInput(message: string): ToolErrorResult {
@@ -603,7 +617,7 @@ async function executeToolCallUnsafe(
       }
 
       case 'list_task_statuses': {
-        const statuses = await listTaskStatuses(workspaceId)
+        const statuses = await listTaskStatuses()
         return { type: 'task_statuses', statuses }
       }
 
@@ -1034,6 +1048,14 @@ async function executeToolCallUnsafe(
         const obj = await getObject(id, workspaceId)
         if (!obj) return notFound(`Object ${id} not found in this workspace`)
 
+        const hasContentUpdate = 'text' in input || 'content' in input
+        // Pre-check E2EE before any write so a mixed title+content update fails
+        // atomically instead of leaving the title written and the content write blocked.
+        if (hasContentUpdate) {
+          const e2ee = await getObjectE2eeStatus(id, workspaceId)
+          if (e2ee) return invalidInput('Object content is end-to-end encrypted and cannot be modified by the MCP server')
+        }
+
         const changedFields: string[] = []
         if ('title' in input) {
           const title = readString(input['title'])
@@ -1041,7 +1063,7 @@ async function executeToolCallUnsafe(
           await updateObjectTitle(id, title, workspaceId)
           changedFields.push('title')
         }
-        if ('text' in input || 'content' in input) {
+        if (hasContentUpdate) {
           const text = readString(input['text'] ?? input['content'])
           if (!text) return invalidInput('Object content cannot be empty')
           await setContent(id, workspaceId, textToTipTapDoc(text))
@@ -1084,12 +1106,31 @@ async function executeToolCallUnsafe(
       }
 
       case 'set_property': {
-        const objectId = String(input['object_id'] ?? '')
-        const key = String(input['key'] ?? '')
-        const valueType = String(input['value_type'] ?? 'text')
-        const value = String(input['value'] ?? '')
-        await upsertProperty(objectId, workspaceId, key, valueType, value)
-        return { type: 'property_set', objectId, key, value }
+        const objectId = readString(input['object_id'])
+        if (!objectId) return invalidInput('Object ID is required')
+        const key = readString(input['key'])
+        if (!key) return invalidInput('Property key is required')
+        const valueTypeRaw = readString(input['value_type']) ?? 'text'
+        const valueType = normalizeValueType(valueTypeRaw)
+        if (!valueType) return invalidInput('value_type must be one of: text, date, number, boolean')
+        // For text, an empty string is a legitimate value (clearing). For other
+        // types, an empty string is invalid. `value` may be undefined or null.
+        const rawValue = input['value']
+        if (rawValue === undefined || rawValue === null) {
+          return invalidInput('Property value is required')
+        }
+        const valueStr = typeof rawValue === 'string' ? rawValue : String(rawValue)
+        if (valueType !== 'text' && valueStr.trim() === '') {
+          return invalidInput(`Property value is required for value_type ${valueType}`)
+        }
+        if (valueType === 'number' && !Number.isFinite(Number(valueStr))) {
+          return invalidInput(`value must be a finite number for value_type number (got "${valueStr}")`)
+        }
+        if (valueType === 'boolean' && parseBooleanValue(valueStr) === null) {
+          return invalidInput(`value must be true/false/1/0/yes/no for value_type boolean (got "${valueStr}")`)
+        }
+        await upsertProperty(objectId, workspaceId, key, valueType, valueStr)
+        return { type: 'property_set', objectId, key, value: valueStr }
       }
 
       case 'navigate_to':
@@ -1110,8 +1151,10 @@ async function resolveTaskInput(
 
   if ('status' in input) {
     const raw = readString(input['status'])
-    if (raw) {
-      const statuses = await listTaskStatuses(workspaceId)
+    if (raw === null) {
+      patch.status = null
+    } else {
+      const statuses = await listTaskStatuses()
       const match = statuses.find((s) => s.toLowerCase() === raw.toLowerCase())
       patch.status = match ?? raw
     }
@@ -1239,7 +1282,7 @@ export function formatToolResult(result: ToolResult): string {
           header,
           `  sourceId: ${source.sourceId}`,
           `  deepLink: ${source.deepLink}`,
-          `  updatedAt: ${source.updatedAt}`,
+          `  updatedAt: ${source.updatedAt ?? '(unknown)'}`,
           `  availability: ${source.availability}`,
         ]
         if (source.snippet) lines.push(`  snippet: ${source.snippet}`)
@@ -1404,7 +1447,7 @@ export function formatToolResult(result: ToolResult): string {
         ...header,
         'Changes:',
         ...(result.items.length
-          ? result.items.map((item) => `- ${item.updatedAt} ${item.type}: ${item.title ?? item.id} (${item.id})`)
+          ? result.items.map((item) => `- ${item.updatedAt ?? '(unknown)'} ${item.type}: ${item.title ?? item.id} (${item.id})`)
           : ['- None']),
         `Next cursor: ${result.nextCursor ?? 'none'}`,
         `Has more: ${result.hasMore}`,

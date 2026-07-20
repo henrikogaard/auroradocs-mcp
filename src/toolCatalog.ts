@@ -885,7 +885,7 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
   },
   {
     name: 'list_week_plan',
-    description: 'Return the AuroraDocs Week Planning view for a Monday-start week, including scheduled and optionally unscheduled tasks.',
+    description: 'Return the AuroraDocs Week Planning view for a Monday-start week, including scheduled and optionally unscheduled tasks. Tasks are capped at the 500 most recently updated.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1306,7 +1306,7 @@ export function getToolEffects(): Readonly<Record<string, McpToolEffect>> {
 
 export function getMcpToolCoverageAudit(): McpToolCoverageAudit {
   return {
-    generatedAt: '2026-07-20',
+    generatedAt: new Date().toISOString(),
     areas: [
       {
         id: 'knowledge',

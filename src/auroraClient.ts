@@ -121,7 +121,7 @@ export type WorkspaceKnowledgeSource = {
   snippet: string | null
   plainText: string | null
   blockId: string | null
-  updatedAt: string
+  updatedAt: string | null
   score: number | null
   matchedFields: Array<'title' | 'content' | 'properties' | 'relationships'>
   availability: WorkspaceKnowledgeAvailability
@@ -177,6 +177,9 @@ type BackendClient = {
 let _client: BackendClient | null = null
 
 export function resetAuroraClientForTests(): void {
+  if (process.env['NODE_ENV'] !== 'test') {
+    throw new Error('resetAuroraClientForTests is only available in test environments')
+  }
   _client = null
 }
 
@@ -674,6 +677,23 @@ export async function restoreObject(id: string, workspaceId: string): Promise<bo
 
 // ── Content ──────────────────────────────────────────────────────────────────
 
+/** Sentinel returned by getContent when content is E2EE-encrypted. */
+export const E2EE_LOCKED_SENTINEL = '<<E2EE_LOCKED>>'
+
+function isE2eeEncryptedPayload(json: unknown): boolean {
+  return typeof json === 'string' && (json.startsWith('v1:') || json.startsWith('v2:'))
+}
+
+/**
+ * Read an object's content as plain text.
+ *
+ * Returns distinct availability states:
+ *   - `not_found` — the object does not exist in this workspace
+ *   - `empty` — the object exists but has no content record or empty content
+ *   - `encrypted_locked` — content is end-to-end encrypted (cannot be read)
+ *   - `permission_denied` — the token lacks `read:content` scope
+ *   - `available` — content was read successfully
+ */
 export async function getContent(objectId: string, workspaceId: string): Promise<ContentReadResult> {
   try {
     // Verify object belongs to workspace
@@ -809,10 +829,39 @@ export async function setContent(
     page: 1,
     perPage: 1,
   })
+  if (existing.items.length > 0 && isE2eeEncryptedPayload(existing.items[0]['content_json'])) {
+    throw new ToolInputError('Object content is end-to-end encrypted and cannot be modified by the MCP server')
+  }
   if (existing.items.length > 0) {
     await client.collection('content').update(String(existing.items[0].id), { content_json: contentJson })
   } else {
     await client.collection('content').create({ object_id: objectId, content_json: contentJson })
+  }
+}
+
+/**
+ * Check whether an object's content is E2EE-encrypted, without fetching the
+ * full content payload. Returns `null` if the object or its content record
+ * is missing. Used to pre-check before mixed write operations (e.g. updating
+ * both title and content) so the operation fails atomically instead of
+ * leaving a half-applied update.
+ */
+export async function getObjectE2eeStatus(objectId: string, workspaceId: string): Promise<boolean | null> {
+  const obj = await getObject(objectId, workspaceId)
+  if (!obj) return null
+  const client = getAuroraClient()
+  try {
+    const records = await client.collection('content').listPage({
+      filter: client.filter('object_id = {:id}', { id: objectId }),
+      page: 1,
+      perPage: 1,
+    })
+    const r = records.items[0]
+    if (!r) return null
+    return isE2eeEncryptedPayload(r['content_json'])
+  } catch (error) {
+    if (error instanceof AuroraApiError && error.status === 404) return null
+    throw error
   }
 }
 
@@ -891,7 +940,7 @@ export async function upsertProperty(
     'value_text'
   const parsedValue =
     valueType === 'number' ? Number(value) :
-    valueType === 'boolean' ? (value === 'true') :
+    valueType === 'boolean' ? parseBooleanValue(value) :
     value
 
   if (existing.items.length > 0) {
@@ -907,6 +956,12 @@ export async function upsertProperty(
   } else {
     await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: parsedValue })
   }
+}
+
+function parseBooleanValue(value: string): boolean {
+  const v = value.trim().toLowerCase()
+  if (v === 'true' || v === '1' || v === 'yes') return true
+  return false
 }
 
 // ── Members ──────────────────────────────────────────────────────────────────
@@ -954,9 +1009,9 @@ export async function listTaskLists(workspaceId: string): Promise<AuroraTaskList
   }))
 }
 
-export async function listTaskStatuses(_workspaceId: string): Promise<string[]> {
+export async function listTaskStatuses(): Promise<string[]> {
   // Task statuses are defined in the schema, not per-workspace.
-  // Return the standard set.
+  // Returns the standard set; custom workspace statuses may not appear.
   return ['Backlog', 'To Do', 'In Progress', 'In Review', 'Done', 'Cancelled']
 }
 
@@ -974,6 +1029,10 @@ export type AuroraTaskProps = {
 
 export async function getTaskProps(objectId: string, workspaceId: string): Promise<AuroraTaskProps> {
   const props = await listProperties([objectId], workspaceId)
+  return propsToTaskProps(props, objectId)
+}
+
+function propsToTaskProps(props: AuroraPropertyRecord[], objectId: string): AuroraTaskProps {
   const get = (key: string) => props.find((p) => p.object_id === objectId && p.key === key)
 
   return {
@@ -1013,39 +1072,64 @@ export async function updateTaskProps(
   objectId: string,
   workspaceId: string,
   patch: Partial<AuroraTaskProps>,
+  options: { existingObject?: AuroraObjectRecord } = {},
 ): Promise<void> {
-  const obj = await getObject(objectId, workspaceId)
+  const obj = options.existingObject ?? await getObject(objectId, workspaceId)
   if (!obj) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
   if (obj.type !== 'task') throw new ToolInputError(`${objectId} is not a task`)
 
   const client = getAuroraClient()
-  const upsert = async (key: string, valueType: string, value: string | number | boolean | null) => {
-    if (value === null || value === '') return
-    const existing = await client.collection('object_properties').listPage({
-      filter: client.filter('object_id = {:oid} && key = {:key}', { oid: objectId, key }),
-      page: 1,
-      perPage: 1,
-    })
+
+  // Collect the (key, valueType, value) triples to write.
+  // undefined => skip, null/'' => clear (set value field to null), otherwise => set
+  type Triple = { key: string; valueType: string; value: string | number | boolean | null }
+  const triples: Triple[] = []
+  if (patch.status !== undefined) triples.push({ key: 'status', valueType: 'text', value: patch.status })
+  if (patch.priority !== undefined) triples.push({ key: 'priority', valueType: 'text', value: patch.priority })
+  if (patch.due_date !== undefined) triples.push({ key: 'due_date', valueType: 'date', value: patch.due_date })
+  if (patch.description !== undefined) triples.push({ key: 'description', valueType: 'text', value: patch.description })
+  if (patch.task_list_id !== undefined) triples.push({ key: 'task_list_id', valueType: 'ref', value: patch.task_list_id })
+  if (patch.assignees !== undefined) triples.push({ key: 'assignees', valueType: 'text', value: JSON.stringify(patch.assignees) })
+  if (patch.labels !== undefined) triples.push({ key: 'labels', valueType: 'text', value: JSON.stringify(patch.labels) })
+
+  if (!triples.length) return
+
+  // Batch: fetch all existing properties for this object in one request, then
+  // partition by key. This avoids one list request per field (N+1 within a
+  // single update_task call).
+  const existing = await client.collection('object_properties').listPage({
+    filter: client.filter('object_id = {:oid}', { oid: objectId }),
+    page: 1,
+    perPage: 50,
+  })
+  const existingByKey = new Map<string, { id: string; record: Record<string, unknown> }>()
+  for (const record of existing.items) {
+    const key = record['key'] as string
+    if (key && !existingByKey.has(key)) {
+      existingByKey.set(key, { id: String(record['id']), record })
+    }
+  }
+
+  for (const { key, valueType, value } of triples) {
+    const isClearing = value === null || value === ''
     const valueField =
       valueType === 'number' ? 'value_num' :
       valueType === 'date' ? 'value_date' :
       valueType === 'boolean' ? 'value_bool' :
       valueType === 'ref' ? 'value_ref' :
       'value_text'
-    if (existing.items.length > 0) {
-      await client.collection('object_properties').update(String(existing.items[0].id), { value_type: valueType, [valueField]: value })
-    } else {
+    const existingEntry = existingByKey.get(key)
+    if (existingEntry) {
+      if (isClearing) {
+        await client.collection('object_properties').update(existingEntry.id, { value_type: valueType, [valueField]: null })
+      } else {
+        await client.collection('object_properties').update(existingEntry.id, { value_type: valueType, [valueField]: value })
+      }
+    } else if (!isClearing) {
       await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: value })
     }
+    // If clearing and no existing record, there is nothing to clear.
   }
-
-  if (patch.status !== undefined) await upsert('status', 'text', patch.status)
-  if (patch.priority !== undefined) await upsert('priority', 'text', patch.priority)
-  if (patch.due_date !== undefined) await upsert('due_date', 'date', patch.due_date)
-  if (patch.description !== undefined) await upsert('description', 'text', patch.description)
-  if (patch.task_list_id !== undefined) await upsert('task_list_id', 'ref', patch.task_list_id)
-  if (patch.assignees !== undefined) await upsert('assignees', 'text', JSON.stringify(patch.assignees))
-  if (patch.labels !== undefined) await upsert('labels', 'text', JSON.stringify(patch.labels))
 }
 
 // ── Planning helpers ─────────────────────────────────────────────────────────
@@ -1056,19 +1140,34 @@ export type AuroraPlanningTask = AuroraTaskProps & {
   updated_at: string | null
 }
 
+/** Maximum number of tasks listPlanningTasks will fetch + hydrate. */
+export const PLANNING_TASKS_MAX = 500
+
 export async function listPlanningTasks(workspaceId: string): Promise<AuroraPlanningTask[]> {
+  // Cap at PLANNING_TASKS_MAX to avoid pulling an unbounded task list + the
+  // associated property hydration cost. list_week_plan's description documents
+  // this ceiling.
   const tasks = await listObjects(workspaceId, 'task')
-  const results: AuroraPlanningTask[] = []
-  for (const task of tasks) {
-    const props = await getTaskProps(task.id, workspaceId)
-    results.push({
+  const capped = tasks.slice(0, PLANNING_TASKS_MAX)
+  if (!capped.length) return []
+  // Batch: fetch all task properties in one batched request instead of N+1.
+  const taskIds = capped.map((task) => task.id)
+  const allProps = await listProperties(taskIds, workspaceId)
+  const propsByObject = new Map<string, AuroraPropertyRecord[]>()
+  for (const prop of allProps) {
+    const list = propsByObject.get(prop.object_id) ?? []
+    list.push(prop)
+    propsByObject.set(prop.object_id, list)
+  }
+  return capped.map((task) => {
+    const props = propsByObject.get(task.id) ?? []
+    return {
       id: task.id,
       title: task.title,
       updated_at: task.updated_at,
-      ...props,
-    })
-  }
-  return results
+      ...propsToTaskProps(props, task.id),
+    }
+  })
 }
 
 export async function readCanvasContent(
@@ -1120,7 +1219,10 @@ function extractTextFromDoc(doc: Record<string, unknown>): string {
     if (content) content.forEach(walk)
   }
   walk(doc)
-  return parts.join(' ').slice(0, 3000)
+  const full = parts.join(' ')
+  if (full.length <= 3000) return full
+  // Append a visible truncation marker so callers can tell the content was cut.
+  return `${full.slice(0, 3000)}… (truncated)`
 }
 
 function normalizeWorkspaceKnowledgeResponse(
@@ -1157,7 +1259,7 @@ function normalizeWorkspaceKnowledgeSource(
   const snippet = typeof value.snippet === 'string' ? value.snippet : null
   const plainText = typeof value.plainText === 'string' ? value.plainText : null
   const blockId = typeof value.blockId === 'string' ? value.blockId : null
-  const updatedAt = typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString()
+  const updatedAt = typeof value.updatedAt === 'string' && value.updatedAt ? value.updatedAt : null
   const score = typeof value.score === 'number' && Number.isFinite(value.score) ? value.score : null
   const matchedFields = Array.isArray(value.matchedFields)
     ? value.matchedFields.filter((field): field is 'title' | 'content' | 'properties' | 'relationships' =>
@@ -1258,6 +1360,15 @@ function getAuroraApiUrl(): string {
   return value.replace(/\/+$/, '')
 }
 
+/** Read the request timeout from env. Default 30s. 0 disables. */
+function readRequestTimeoutMs(): number {
+  const raw = process.env['AURORA_REQUEST_TIMEOUT_MS']?.trim()
+  if (!raw) return 30000
+  const ms = Number(raw)
+  if (!Number.isFinite(ms) || ms < 0) return 30000
+  return Math.ceil(ms)
+}
+
 async function ensureAuthRecord(): Promise<void> {
   const client = getAuroraClient()
   if (client.authStore.record?.['id']) return
@@ -1280,7 +1391,8 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
     template.replace(/\{:(\w+)\}/g, (_match, key: string) => {
       const value = params[key]
       if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-      return `"${String(value ?? '').replaceAll('"', '\\"')}"`
+      // Escape backslashes first, then double quotes, to prevent filter injection.
+      return `"${String(value ?? '').replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
     })
 
   const request = async <T = unknown>(path: string, options: { method?: string; body?: unknown; rawBody?: BodyInit; headers?: HeadersInit } = {}): Promise<T> => {
@@ -1288,14 +1400,19 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
     if (authStore.token) headers.set('authorization', `Bearer ${authStore.token}`)
     if (options.body !== undefined && options.rawBody !== undefined) throw new Error('Request cannot contain JSON and raw bodies together')
     if (options.body !== undefined) headers.set('content-type', 'application/json')
+    const timeoutMs = readRequestTimeoutMs()
     let response: Response
     try {
       response = await fetch(`${baseUrl}${path.startsWith('/') ? path : `/${path}`}`, {
         method: options.method ?? 'GET',
         headers,
         body: options.rawBody ?? (options.body === undefined ? undefined : JSON.stringify(options.body)),
+        signal: timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined,
       })
     } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new AuroraApiError(0, 'timeout', `Request timed out after ${timeoutMs}ms`)
+      }
       throw new AuroraApiError(
         0,
         'network_error',
