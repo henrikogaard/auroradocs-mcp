@@ -31,8 +31,8 @@
     "aurora-mcp": "dist/index.js"
   },
   "scripts": {
-    "test": "tsx --test src/*.test.ts src/obsidian/*.test.ts",
-    "test:live-smoke-contract": "node --import tsx --test scripts/auroracloudLiveSmoke.test.mjs",
+    "test": "NODE_ENV=test tsx --test src/*.test.ts src/obsidian/*.test.ts",
+    "test:live-smoke-contract": "NODE_ENV=test node --import tsx --test scripts/auroracloudLiveSmoke.test.mjs",
     "test:docs": "node --test scripts/docsContract.test.mjs",
     "test:contracts": "node --test scripts/checkWiring.test.mjs scripts/packageContentsCore.test.mjs",
     "test:stdio": "pnpm build && tsx --test test/stdio.integration.test.ts",
