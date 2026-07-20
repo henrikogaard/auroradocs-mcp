@@ -8,6 +8,7 @@ import {
   listAuroraObjectTypes,
   listAuroraTemplates,
   resetAuroraClientForTests,
+  restoreObject,
   upsertAuroraPropertyStable,
 } from './auroraClient.js'
 
@@ -177,5 +178,32 @@ test('property type changes clear obsolete value columns', async () => {
   }, async () => {
     await upsertAuroraPropertyStable('object-property', 'workspace-1', 'rating', 'number', 4)
     assert.deepEqual(updateBody, { value_type: 'number', value_text: null, value_num: 4, value_date: null, value_bool: null, value_ref: null })
+  })
+})
+
+test('object restore is workspace-checked, idempotent, and avoids redundant writes', async () => {
+  let deleted = true
+  const patches: Record<string, unknown>[] = []
+  await withServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    res.setHeader('content-type', 'application/json')
+    if (req.method === 'GET' && url.pathname === '/api/collections/objects/records/object-trashed') {
+      res.end(JSON.stringify({
+        id: 'object-trashed', workspace_id: 'workspace-1', type: 'page', title: 'Recover me',
+        icon: null, parent_id: null, is_deleted: deleted, is_template: false,
+        created_at: 'now', updated_at: 'now',
+      })); return
+    }
+    if (req.method === 'PATCH' && url.pathname === '/api/collections/objects/records/object-trashed') {
+      const body = await bodyOf(req)
+      patches.push(body)
+      deleted = Boolean(body['is_deleted'])
+      res.end(JSON.stringify({ id: 'object-trashed', ...body })); return
+    }
+    res.statusCode = 404; res.end(JSON.stringify({ code: 'not_found' }))
+  }, async () => {
+    assert.equal(await restoreObject('object-trashed', 'workspace-1'), true)
+    assert.equal(await restoreObject('object-trashed', 'workspace-1'), false)
+    assert.deepEqual(patches, [{ is_deleted: false }])
   })
 })

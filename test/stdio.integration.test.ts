@@ -202,6 +202,7 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
     client = new Client({ name: 'auroradocs-mcp-stdio-test', version: '1.0.0' })
     await client.connect(transport)
 
+    assert.deepEqual(client.getServerCapabilities()?.completions, {})
     const instructions = client.getInstructions()
     assert.match(instructions ?? '', /list_workspaces/)
     assert.match(instructions ?? '', /exact plan ID and hash/)
@@ -213,12 +214,19 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
       'list_object_types', 'get_custom_database_recipes', 'plan_custom_database', 'apply_custom_database_plan',
       'list_templates', 'create_template', 'create_from_template',
       'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status',
+      'restore_object',
     ]) assert(listed.tools.some((tool) => tool.name === name), `missing MCP tool ${name}`)
 
     const prompts = await client.listPrompts()
     assert(prompts.prompts.some((prompt) => prompt.name === 'resume_project'))
     assert(prompts.prompts.some((prompt) => prompt.name === 'custom_database_design'))
+    assert(prompts.prompts.some((prompt) => prompt.name === 'template_instantiation'))
     assert(prompts.prompts.some((prompt) => prompt.name === 'obsidian_import'))
+    const workspaceCompletion = await client.complete({
+      ref: { type: 'ref/prompt', name: 'resume_project' },
+      argument: { name: 'workspace_id', value: 'workspace' },
+    })
+    assert.deepEqual(workspaceCompletion.completion, { values: [workspaceId], total: 1, hasMore: false })
     const prompt = await client.getPrompt({
       name: 'resume_project',
       arguments: { workspace_id: workspaceId, project_id: 'project-test' },

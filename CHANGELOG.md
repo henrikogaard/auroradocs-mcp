@@ -18,6 +18,11 @@ All notable changes to this project are documented in this file.
   private journals.
 - Added `custom_database_design` and `obsidian_import` prompts plus coverage and
   workflow-recipe guidance for agents.
+- Added MCP prompt/resource argument completions for authorized workspaces,
+  projects, custom-database recipes/object types, and templates, plus the
+  approval-gated `template_instantiation` prompt.
+- Added idempotent `restore_object` support for recovering soft-deleted objects
+  with an explicit changed/already-active result.
 
 ### Changed
 
@@ -25,6 +30,9 @@ All notable changes to this project are documented in this file.
   capability discovery, explicit workspace selection, structured results,
   citations, read-before-write behavior, exact-plan approval, and untrusted
   workspace/vault content.
+- Enriched machine-readable workflow recipes with approval mode, allowed write
+  tools/rules, stop conditions, expected structured result types, and current
+  split task scopes.
 - Documented and contract-tested the release gate that requires a package/tag
   version match and creates the npm package and GitHub Release from the same
   tag.

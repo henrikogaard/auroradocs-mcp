@@ -216,7 +216,9 @@ If the process does not start or no tools appear, use
 After verification, give the connected assistant the packaged
 [Agent guide](agent-guide.md). Compatible MCP clients also receive its core
 workspace, approval, citation, and untrusted-content rules as server
-initialization instructions.
+initialization instructions. Clients that implement MCP completions can also
+offer authorized workspace, project, object-type, recipe, and template values
+for supported prompt and resource-template arguments.
 
 ## Renew or revoke access
 

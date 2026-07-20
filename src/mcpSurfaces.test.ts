@@ -5,11 +5,13 @@ import test from 'node:test'
 import { resetAuroraClientForTests } from './auroraClient.js'
 import type { AuroraConnectionContext } from './contracts.js'
 import {
+  completeAuroraArgument,
   getAuroraPrompt,
   getAuroraPromptDefinitions,
   getCustomDatabaseDesignPrompt,
   getObsidianImportPrompt,
   getResumeProjectPrompt,
+  getTemplateInstantiationPrompt,
   readAuroraResource,
 } from './mcpSurfaces.js'
 
@@ -117,6 +119,25 @@ test('resume_project prompt supports a query but requires exactly one project se
   }
 })
 
+test('guided prompts accept exactly one workspace ID or alias selector', () => {
+  const resume = getResumeProjectPrompt({ workspace_alias: 'henrik-pkm', project_id: 'project-1' })
+  const resumeText = resume.messages[0]?.content.type === 'text' ? resume.messages[0].content.text : ''
+  assert.match(resumeText, /workspace_alias.*henrik-pkm/i)
+
+  const database = getCustomDatabaseDesignPrompt({ workspace_alias: 'henrik-pkm' })
+  const databaseText = database.messages[0]?.content.type === 'text' ? database.messages[0].content.text : ''
+  assert.match(databaseText, /workspace_alias.*henrik-pkm/i)
+
+  const obsidian = getObsidianImportPrompt({ workspace_alias: 'henrik-pkm' })
+  const obsidianText = obsidian.messages[0]?.content.type === 'text' ? obsidian.messages[0].content.text : ''
+  assert.match(obsidianText, /workspace_alias.*henrik-pkm/i)
+
+  assert.throws(
+    () => getResumeProjectPrompt({ workspace_id: 'workspace-1', workspace_alias: 'henrik-pkm', project_id: 'project-1' }),
+    /exactly one of workspace_id or workspace_alias/i,
+  )
+})
+
 test('custom database prompt teaches recipe-first additive plan and explicit apply behavior', () => {
   const prompt = getCustomDatabaseDesignPrompt({ workspace_id: 'workspace-1', use_case: 'Dive equipment' })
   const text = prompt.messages[0]?.content.type === 'text' ? prompt.messages[0].content.text : ''
@@ -140,12 +161,127 @@ test('Obsidian import prompt requires analyze, later acceptance, exact hash, and
   assert.match(text, /source vault.*never modified/i)
 })
 
+test('template instantiation prompt resolves one suggested template before an approved write', () => {
+  const prompt = getTemplateInstantiationPrompt({
+    workspace_id: 'workspace-1', template: 'Gear checkout', object_id: 'planned-object-1',
+  })
+  const text = prompt.messages[0]?.content.type === 'text' ? prompt.messages[0].content.text : ''
+  assert.match(text, /list_templates/)
+  assert.match(text, /Gear checkout/)
+  assert.match(text, /planned-object-1/)
+  assert.match(text, /unambiguous/i)
+  assert.match(text, /explicit user approval/i)
+  assert.match(text, /create_from_template/)
+})
+
 test('prompt catalog and dispatcher expose all guided workflows', () => {
   assert.deepEqual(getAuroraPromptDefinitions().map((prompt) => prompt.name), [
-    'resume_project', 'custom_database_design', 'obsidian_import',
+    'resume_project', 'custom_database_design', 'template_instantiation', 'obsidian_import',
   ])
   assert.equal(getAuroraPrompt('custom_database_design', { workspace_id: 'workspace-1' }).messages.length, 1)
   assert.throws(() => getAuroraPrompt('missing', {}), /Unknown AuroraDocs prompt/)
+})
+
+test('completion provider suggests projects, object types, recipes, and templates in one granted workspace', async () => {
+  await withApi((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://localhost')
+    response.setHeader('content-type', 'application/json')
+    if (url.pathname === '/api/collections/objects/records') {
+      const filter = url.searchParams.get('filter') ?? ''
+      if (filter.includes('is_template')) {
+        response.end(JSON.stringify({
+          page: 1, perPage: 50, totalPages: 2, totalItems: 51,
+          items: [{
+            id: 'template-gear', workspace_id: 'workspace-1', type: 'custom:equipment', title: 'Gear checkout',
+            icon: null, parent_id: null, is_deleted: false, is_template: true,
+            created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T12:00:00Z',
+          }],
+        })); return
+      }
+      response.end(JSON.stringify({
+        page: 1, perPage: 50, totalPages: 2, totalItems: 52,
+        items: [
+          {
+            id: 'project-launch', workspace_id: 'workspace-1', type: 'project', title: 'Launch AuroraDocs',
+            icon: null, parent_id: null, is_deleted: false, is_template: false,
+            created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T12:00:00Z',
+          },
+          {
+            id: 'project-migration', workspace_id: 'workspace-1', type: 'project', title: 'Migrate knowledge',
+            icon: null, parent_id: null, is_deleted: false, is_template: false,
+            created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T12:00:00Z',
+          },
+        ],
+      })); return
+    }
+    if (url.pathname === '/api/collections/object_types/records') {
+      response.end(JSON.stringify({
+        page: 1, perPage: 50, totalPages: 1, totalItems: 1,
+        items: [{
+          id: 'type-equipment', workspace_id: 'workspace-1', name: 'Equipment tracker', icon: null,
+          color: null, schema: [], created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T12:00:00Z',
+        }],
+      })); return
+    }
+    response.statusCode = 404
+    response.end(JSON.stringify({ code: 'not_found' }))
+  }, async () => {
+    const prompt = (name: string, argument: string, value: string) => completeAuroraArgument({
+      ref: { type: 'ref/prompt', name },
+      argument: { name: argument, value },
+      context: { arguments: { workspace_alias: 'henrik-pkm' } },
+    }, context)
+
+    const projectIds = await prompt('resume_project', 'project_id', 'launch')
+    assert.deepEqual(projectIds.completion.values, ['project-launch'])
+    assert.equal(projectIds.completion.hasMore, true)
+    assert.equal(projectIds.completion.total, undefined)
+    assert.deepEqual((await prompt('resume_project', 'query', 'migrate')).completion.values, ['Migrate knowledge'])
+    assert.deepEqual((await prompt('custom_database_design', 'object_type', 'equipment')).completion.values, ['Equipment tracker', 'type-equipment'])
+    assert.deepEqual((await prompt('custom_database_design', 'use_case', 'expense')).completion.values, ['expenses'])
+    const templateCompletion = await prompt('template_instantiation', 'template', 'checkout')
+    assert.deepEqual(templateCompletion.completion.values, ['Gear checkout'])
+    assert.equal(templateCompletion.completion.hasMore, true)
+    assert.equal(templateCompletion.completion.total, undefined)
+
+    const resource = await completeAuroraArgument({
+      ref: { type: 'ref/resource', uri: 'aurora://workspaces/{workspaceId}/projects/{projectId}/context' },
+      argument: { name: 'projectId', value: 'migration' },
+      context: { arguments: { workspaceId: 'workspace-1' } },
+    }, context)
+    assert.deepEqual(resource.completion.values, ['project-migration'])
+  })
+})
+
+test('completion provider rejects foreign-workspace project and template records', async () => {
+  await withApi((request, response) => {
+    const url = new URL(request.url ?? '/', 'http://localhost')
+    response.setHeader('content-type', 'application/json')
+    if (url.pathname === '/api/collections/objects/records') {
+      const isTemplate = (url.searchParams.get('filter') ?? '').includes('is_template')
+      response.end(JSON.stringify({
+        page: 1, perPage: 50, totalPages: 1, totalItems: 1,
+        items: [{
+          id: isTemplate ? 'foreign-template' : 'foreign-project',
+          workspace_id: 'workspace-other', type: isTemplate ? 'page' : 'project',
+          title: 'Private foreign record', icon: null, parent_id: null,
+          is_deleted: false, is_template: isTemplate,
+          created_at: '2026-07-01T10:00:00Z', updated_at: '2026-07-01T12:00:00Z',
+        }],
+      })); return
+    }
+    response.statusCode = 404
+    response.end(JSON.stringify({ code: 'not_found' }))
+  }, async () => {
+    const request = (name: string, argument: string) => completeAuroraArgument({
+      ref: { type: 'ref/prompt', name },
+      argument: { name: argument, value: '' },
+      context: { arguments: { workspace_id: 'workspace-1' } },
+    }, context)
+
+    await assert.rejects(() => request('resume_project', 'project_id'), /foreign workspace record/i)
+    await assert.rejects(() => request('template_instantiation', 'template'), /foreign workspace record/i)
+  })
 })
 
 test('project context resource delegates to the same strict normalized service contract', async () => {

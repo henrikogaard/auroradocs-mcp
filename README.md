@@ -181,6 +181,19 @@ The client must launch the process locally and communicate over stdio. Do not
 configure `https://api.auroradocs.eu` as an MCP HTTP/SSE URL; it is the API the
 local server calls, not a hosted MCP endpoint.
 
+## Agent discovery and recovery — 0.2.1 source
+
+The server sends initialization instructions, exposes machine-readable workflow
+recipes with approval/write/stop/result contracts, and advertises MCP
+completions for authorized workspace, project, object-type, recipe, and template
+prompt/resource arguments. The `template_instantiation` prompt guides an exact
+template selection before creation. `restore_object` recovers an explicitly
+identified soft-deleted object and safely reports when it was already active.
+
+MCP completions apply to prompt and resource-template arguments; direct tool
+inputs continue to use the bounded discovery tools documented in the
+[Agent guide](docs/agent-guide.md).
+
 ## Custom databases and templates — 0.2.1 source
 
 The current source can discover existing object types/templates, offer starter

@@ -37,12 +37,50 @@ instruction support require a local source build until `0.2.1` is released.
 | Review work or plan a week | `list_task_lists`, `list_week_plan` | `list_task_statuses`, bounded object reads | Propose edits first |
 | Change tasks or objects | The matching read tool | `create_task`, `update_task`, `set_property`, content tools | Apply only the user-approved fields |
 | Design a custom database | `custom_database_design` prompt | recipes, types, templates, plan, apply | Exact approved plan ID and hash |
-| Reuse a template | `list_templates` | `create_from_template` | Confirm destination and new object fields |
+| Reuse a template | `template_instantiation` prompt | `list_templates`, `create_from_template` | Confirm exact template and optional planned object ID |
+| Recover a trashed object | Read the target identity | `restore_object` | Confirm the exact object ID to restore |
 | Import an Obsidian vault | `obsidian_import` prompt | analyze, plan pages, import batches, status | Later explicit acceptance of exact plan |
 
 The complete tool-to-scope matrix is in [Tools and scopes](tools.md). Tool
 descriptions, input schemas, output schemas, annotations, and workflow recipes
 returned by the server are the runtime source of truth.
+
+## MCP argument completions
+
+Compatible clients can request bounded MCP argument completions for prompt and
+resource-template arguments. Suggestions are filtered to the typed fragment,
+limited to 100 values, and resolved only inside an authorized workspace:
+
+- workspace selectors: `workspace_id`, `workspace_alias`, and resource
+  `workspaceId`
+- project selectors: project_id and query values for `resume_project`, plus
+  resource `projectId`
+- custom databases: recipe `use_case` IDs and existing `object_type` IDs/names
+- templates: IDs and titles for the `template_instantiation` prompt
+
+When `hasMore` is true, narrow the typed fragment; do not treat the first
+bounded source page as an exhaustive selector list.
+
+Previously resolved workspace arguments must be sent in completion context
+before requesting project, object-type, or template suggestions. MCP does not
+currently define completion requests for raw tool input-schema fields; use
+these prompt/resource selectors or discovery tools instead of guessing.
+
+## Machine-readable workflow controls
+
+Each object returned by `get_mcp_workflow_recipes` includes more than prose:
+
+- `approvalMode` declares no approval, per-write confirmation, exact-plan
+  approval, or later explicit consent.
+- `writeBoundary.allowedTools` and `writeBoundary.rule` define the only writes
+  permitted by that recipe.
+- `stopConditions` list states where the agent must stop rather than retry,
+  infer, or broaden the workflow.
+- `expectedResultTypes` name the `structuredContent.type` values an agent should
+  expect while executing the recipe.
+
+Treat these fields as executable planning constraints. A tool being available
+does not place it inside the selected recipe's write boundary.
 
 ## Read and response contract
 
@@ -80,6 +118,8 @@ Writes should be narrow and traceable to current user intent:
 
 `delete_object` is reversible soft deletion in AuroraDocs, but agents should
 treat it as destructive and request confirmation for the exact object.
+`restore_object` is idempotent: it returns `changed: true` only when a trashed
+object was restored and `changed: false` when the object was already active.
 
 ## Workflow: resume a project
 
@@ -122,9 +162,11 @@ Templates may contain starter content and schema-declared defaults, but never
 put real credentials, payment data, or sensitive personal records in a shared
 template.
 
-To create an item from an existing template, first use `list_templates`, show
-the selected template and destination title, then call `create_from_template`
-only after the user confirms those inputs.
+To create an item from an existing template, start the
+`template_instantiation` prompt when available. Use `list_templates`, resolve
+the completed ID/title selector unambiguously, show the selected template and
+copied title plus optional planned object ID, then call `create_from_template`
+only after the user confirms those exact inputs.
 
 ## Workflow: import an Obsidian vault
 
@@ -163,6 +205,8 @@ write. Re-analyze after source drift; never work around a failed-closed check.
   vault. Only the explicit root is eligible for bounded local analysis.
 - Tool coverage is intentionally finite. If `get_mcp_tool_coverage` reports a
   gap, explain it instead of simulating success with unrelated tools.
+- Protocol completions cover prompt and resource-template arguments, not raw
+  tool inputs. Discovery tools remain authoritative for direct tool calls.
 
 For installation and credentials, see [Setup](setup.md). For narrower
 read-only automation profiles, see [Agent profiles](agent-profiles.md). For

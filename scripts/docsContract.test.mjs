@@ -328,6 +328,16 @@ test('packaged agent guide maps capabilities to safe, concrete workflows', async
     'list_workspaces',
     'get_mcp_tool_coverage',
     'get_mcp_workflow_recipes',
+    'MCP argument completions',
+    'prompt and resource-template arguments',
+    'project_id and query',
+    'object_type',
+    'template_instantiation',
+    'approvalMode',
+    'writeBoundary',
+    'stopConditions',
+    'expectedResultTypes',
+    'restore_object',
     'structuredContent',
     'nextCursor',
     'sourceId and deepLink',
@@ -347,6 +357,7 @@ test('packaged agent guide maps capabilities to safe, concrete workflows', async
   ]) {
     assert.ok(normalized.includes(text), `docs/agent-guide.md is missing agent guidance: ${text}`)
   }
+  assert.match(tools, /^\| `restore_object` \|/m)
 })
 
 test('publication audit contains only public-safe repository context', async () => {

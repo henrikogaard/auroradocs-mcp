@@ -439,12 +439,19 @@ export async function updateAuroraObjectType(
 }
 
 export async function listAuroraTemplates(workspaceId: string, type?: string): Promise<AuroraObjectRecord[]> {
+  return (await listAuroraTemplatesPage(workspaceId, type)).items
+}
+
+export async function listAuroraTemplatesPage(
+  workspaceId: string,
+  type?: string,
+): Promise<CollectionPage<AuroraObjectRecord>> {
   const client = getAuroraClient()
   const filter = type
     ? client.filter('workspace_id = {:wid} && is_deleted = false && is_template = true && type = {:type}', { wid: workspaceId, type })
     : client.filter('workspace_id = {:wid} && is_deleted = false && is_template = true', { wid: workspaceId })
   const page = await client.collection('objects').listPage({ filter, sort: '-updated_at', page: 1, perPage: 50 })
-  return page.items.map(mapObject)
+  return { ...page, items: page.items.map(mapObject) }
 }
 
 function propertyValueField(valueType: PropertyValueType): keyof Pick<AuroraPropertyRecord, 'value_text' | 'value_num' | 'value_date' | 'value_bool' | 'value_ref'> {
@@ -655,6 +662,14 @@ export async function deleteObject(id: string, workspaceId: string): Promise<voi
   if (!obj) throw new ToolNotFoundError(`Object ${id} not found in this workspace`)
   const client = getAuroraClient()
   await client.collection('objects').update(id, { is_deleted: true })
+}
+
+export async function restoreObject(id: string, workspaceId: string): Promise<boolean> {
+  const obj = await getObject(id, workspaceId)
+  if (!obj) throw new ToolNotFoundError(`Object ${id} not found in this workspace`)
+  if (!obj.is_deleted) return false
+  await getAuroraClient().collection('objects').update(id, { is_deleted: false })
+  return true
 }
 
 // ── Content ──────────────────────────────────────────────────────────────────

@@ -46,6 +46,32 @@ test('server advertises a safe agent operating contract during initialization', 
   }
 })
 
+test('server advertises MCP completions for workspace prompt and resource arguments', async () => {
+  const server = createAuroraMcpServer(context)
+  const client = new Client({ name: 'completion-test', version: '1.0.0' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  try {
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    assert.deepEqual(client.getServerCapabilities()?.completions, {})
+
+    const alias = await client.complete({
+      ref: { type: 'ref/prompt', name: 'resume_project' },
+      argument: { name: 'workspace_alias', value: 'work' },
+    })
+    assert.deepEqual(alias.completion, { values: ['workspace-1'], total: 1, hasMore: false })
+
+    const workspaceId = await client.complete({
+      ref: { type: 'ref/resource', uri: 'aurora://workspaces/{workspaceId}/projects/{projectId}/context' },
+      argument: { name: 'workspaceId', value: 'space' },
+    })
+    assert.deepEqual(workspaceId.completion, { values: ['workspace-1'], total: 1, hasMore: false })
+  } finally {
+    await client.close().catch(() => undefined)
+    await server.close().catch(() => undefined)
+  }
+})
+
 test('server uses advertised form elicitation and decline returns a write-free no-op', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'aurora-server-consent-'))
   const vaultRoot = path.join(root, 'Vault')
