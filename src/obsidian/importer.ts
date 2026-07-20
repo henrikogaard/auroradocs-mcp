@@ -55,7 +55,7 @@ function defaults(): ObsidianImportDependencies {
   }
 }
 
-function digest(value: string): string { return createHash('sha256').update(value).digest('hex') }
+function digest(value: string | Buffer): string { return createHash('sha256').update(value).digest('hex') }
 function schemasEqual(left: ObjectTypeSchema[], right: ObjectTypeSchema[]): boolean {
   return JSON.stringify(validateCustomDatabaseSchema(left)) === JSON.stringify(validateCustomDatabaseSchema(right))
 }
@@ -75,15 +75,26 @@ function blocked(stored: StoredObsidianImportPlan, code: string): ObsidianImport
   return { status: 'blocked', planId: stored.plan.planId, planHash: stored.plan.planHash, completed: 0, failed: 0, remaining: stored.plan.entries.length, nextCursor: null, warnings: [{ code }] }
 }
 
-function validateCapabilities(capability: AuroraImportCapabilities, stored: StoredObsidianImportPlan): string | null {
+function attachmentJournalKey(attachment: { sourceHash: string; relativePath: string }): string {
+  return `attachment_${digest(`${attachment.relativePath}\0${attachment.sourceHash}`)}`
+}
+
+function validateCapabilities(
+  capability: AuroraImportCapabilities,
+  stored: StoredObsidianImportPlan,
+  journal: ImportJournal | null,
+): string | null {
   if (capability.workspaceId !== stored.plan.workspaceId) return 'foreign_workspace_capability'
   if (capability.e2ee.importBlocked || capability.e2ee.enabled) return 'e2ee_import_blocked'
   if (!['owner', 'admin', 'editor'].includes(capability.role)) return 'role_not_writable'
   for (const scope of ['read:objects', 'write:objects', 'write:content']) if (!capability.scopes.includes(scope)) return `missing_scope_${scope.replace(':', '_')}`
   if (stored.plan.attachmentPolicy === 'referenced' && stored.analysis.attachments.length) {
     if (!capability.storage.available) return 'attachment_storage_unavailable'
-    const totalBytes = stored.analysis.attachments.reduce((sum, item) => sum + item.sizeBytes, 0)
-    if (stored.analysis.attachments.some((item) => item.sizeBytes > capability.upload.maxBytes)) return 'attachment_too_large'
+    const remainingAttachments = stored.analysis.attachments.filter(
+      (item) => journal?.attachments[attachmentJournalKey(item)]?.status !== 'complete',
+    )
+    const totalBytes = remainingAttachments.reduce((sum, item) => sum + item.sizeBytes, 0)
+    if (remainingAttachments.some((item) => item.sizeBytes > capability.upload.maxBytes)) return 'attachment_too_large'
     if (totalBytes > capability.upload.remainingBytes) return 'attachment_quota_exceeded'
   }
   return null
@@ -92,8 +103,13 @@ function validateCapabilities(capability: AuroraImportCapabilities, stored: Stor
 function resultFromJournal(stored: StoredObsidianImportPlan, journal: ImportJournal, warnings: ObsidianImportWarning[]): ObsidianImportBatchResult {
   const values = Object.values(journal.entries)
   const completed = values.filter((entry) => entry.status === 'complete').length
+  const attachmentValues = stored.plan.attachmentPolicy === 'referenced'
+    ? stored.analysis.attachments.map((attachment) => journal.attachments[attachmentJournalKey(attachment)])
+    : []
   const failed = values.filter((entry) => entry.status === 'failed').length
+    + attachmentValues.filter((entry) => entry?.status === 'failed').length
   const remaining = stored.plan.entries.length - completed
+    + attachmentValues.filter((entry) => entry?.status !== 'complete').length
   const status = remaining === 0 && failed === 0 ? 'complete' : failed > 0 ? 'partial' : 'in_progress'
   journal.status = status
   return {
@@ -101,6 +117,24 @@ function resultFromJournal(stored: StoredObsidianImportPlan, journal: ImportJour
     completed, failed, remaining, nextCursor: status === 'complete' ? null : journal.cursor,
     warnings: [...new Map(warnings.map((warning) => [`${warning.code}:${warning.entryId ?? ''}`, warning])).values()].slice(0, 100),
   }
+}
+
+function selectPendingEntries(
+  entries: ObsidianImportEntry[],
+  journal: ImportJournal,
+  batchSize: number,
+): { entries: ObsidianImportEntry[]; nextCursor: number } {
+  if (!entries.length) return { entries: [], nextCursor: 0 }
+  const start = ((journal.cursor % entries.length) + entries.length) % entries.length
+  const selected: ObsidianImportEntry[] = []
+  let nextCursor = start
+  for (let offset = 0; offset < entries.length && selected.length < batchSize; offset += 1) {
+    const index = (start + offset) % entries.length
+    const entry = entries[index]!
+    nextCursor = (index + 1) % entries.length
+    if (journal.entries[entry.id]?.status !== 'complete') selected.push(entry)
+  }
+  return { entries: selected, nextCursor }
 }
 
 function containerJournalKey(container: ObsidianImportContainer): string { return `container_${digest(container.folder).slice(0, 16)}` }
@@ -170,26 +204,28 @@ export async function runObsidianImportBatch(
   } catch {
     return blocked(stored, 'stale_plan')
   }
+  let journal = await readImportJournal(stateDir, stored.plan.planId)
+  if (
+    journal && (
+      journal.planHash !== stored.plan.planHash || journal.workspaceId !== stored.plan.workspaceId
+      || journal.rootIdentityHash !== stored.plan.rootIdentityHash || journal.inventoryHash !== stored.plan.inventoryHash
+    )
+  ) return blocked(stored, 'journal_mismatch')
   let capability: AuroraImportCapabilities
   try { capability = await dependencies.getCapabilities(stored.plan.workspaceId) } catch { return blocked(stored, 'preflight_unavailable') }
-  const capabilityBlock = validateCapabilities(capability, stored)
+  const capabilityBlock = validateCapabilities(capability, stored, journal)
   if (capabilityBlock) return blocked(stored, capabilityBlock)
-
-  let journal = await readImportJournal(stateDir, stored.plan.planId)
   if (!journal) journal = createImportJournal({
     planId: stored.plan.planId, planHash: stored.plan.planHash, workspaceId: stored.plan.workspaceId,
     rootIdentityHash: stored.plan.rootIdentityHash, inventoryHash: stored.plan.inventoryHash,
   }, dependencies.now())
-  if (
-    journal.planHash !== stored.plan.planHash || journal.workspaceId !== stored.plan.workspaceId
-    || journal.rootIdentityHash !== stored.plan.rootIdentityHash || journal.inventoryHash !== stored.plan.inventoryHash
-  ) return blocked(stored, 'journal_mismatch')
   if (journal.status === 'complete') return resultFromJournal(stored, journal, [])
   journal.status = 'in_progress'; journal.updatedAt = dependencies.now().toISOString()
   await writeImportJournal(stateDir, journal)
 
   const warnings: ObsidianImportWarning[] = []
-  const pending = stored.plan.entries.filter((entry) => journal?.entries[entry.id]?.status !== 'complete').slice(0, batchSize)
+  const selection = selectPendingEntries(stored.plan.entries, journal, batchSize)
+  const pending = selection.entries
   let existingTypes: ObjectTypeDef[]
   try { existingTypes = await dependencies.listObjectTypes(stored.plan.workspaceId) } catch { return blocked(stored, 'object_type_preflight_failed') }
   const neededGroupIds = new Set(pending.map((entry) => entry.groupId).filter((value): value is string => Boolean(value)))
@@ -246,6 +282,12 @@ export async function runObsidianImportBatch(
   for (const container of containers) {
     const key = containerJournalKey(container)
     if (journal.containers[key]?.status === 'complete') continue
+    if (container.parentFolder && !containerIds.has(container.parentFolder)) {
+      journal.containers[key] = { objectId: container.objectId, status: 'failed', errorCode: 'parent_container_prerequisite_failed' }
+      warnings.push({ code: 'parent_container_prerequisite_failed' })
+      journal.updatedAt = dependencies.now().toISOString(); await writeImportJournal(stateDir, journal)
+      continue
+    }
     try {
       const object = await dependencies.createObject(stored.plan.workspaceId, {
         id: container.objectId, type: container.type, title: container.title,
@@ -265,9 +307,23 @@ export async function runObsidianImportBatch(
     const note = entry.kind === 'note' ? stored.analysis.notes.find((candidate) => candidate.relativePath === entry.relativePath) : null
     const canvas = entry.kind === 'canvas' ? stored.analysis.canvases.find((candidate) => candidate.relativePath === entry.relativePath) : null
     const groupTypeId = entry.groupId ? groupTypeIds.get(entry.groupId) : null
+    if (entry.groupId && !groupTypeId) {
+      const code = journal.groups[entry.groupId]?.errorCode ?? 'object_type_prerequisite_failed'
+      journal.entries[entry.id] = { sourceHash: entry.sourceHash, objectId: entry.objectId, phase: 'pending', status: 'failed', warningCodes: [], errorCode: code }
+      warnings.push({ code, entryId: entry.id })
+      journal.updatedAt = dependencies.now().toISOString(); await writeImportJournal(stateDir, journal)
+      continue
+    }
     const type = entry.mapping === 'canvas' ? 'canvas' : groupTypeId ? `custom:${groupTypeId}` : 'page'
     const title = note?.title ?? canvas?.title ?? path.posix.basename(entry.relativePath, path.posix.extname(entry.relativePath))
     const folder = entryFolder(entry, stored)
+    if (stored.plan.hierarchyPolicy !== 'flatten' && folder && !containerIds.has(folder)) {
+      const code = 'container_prerequisite_failed'
+      journal.entries[entry.id] = { sourceHash: entry.sourceHash, objectId: entry.objectId, phase: 'pending', status: 'failed', warningCodes: [], errorCode: code }
+      warnings.push({ code, entryId: entry.id })
+      journal.updatedAt = dependencies.now().toISOString(); await writeImportJournal(stateDir, journal)
+      continue
+    }
     try {
       await dependencies.createObject(stored.plan.workspaceId, {
         id: entry.objectId, type, title,
@@ -284,21 +340,28 @@ export async function runObsidianImportBatch(
   }
 
   if (stored.plan.attachmentPolicy === 'referenced') {
-    const selectedPaths = new Set(pending.map((entry) => entry.relativePath))
-    for (const attachment of stored.analysis.attachments.filter((item) => item.referencedBy.some((source) => selectedPaths.has(source)))) {
-      const key = `attachment_${attachment.sourceHash}`
+    const attachmentBatch = stored.analysis.attachments
+      .filter((item) => journal.attachments[attachmentJournalKey(item)]?.status !== 'complete')
+      .filter((item) => item.referencedBy.some((source) => {
+        const entry = stored.plan.entries.find((candidate) => candidate.relativePath === source)
+        return Boolean(entry && (journal.entries[entry.id]?.phase === 'object' || journal.entries[entry.id]?.status === 'complete'))
+      }))
+      .slice(0, batchSize)
+    for (const attachment of attachmentBatch) {
+      const key = attachmentJournalKey(attachment)
       if (journal.attachments[key]?.status === 'complete') continue
       const parentEntry = attachment.referencedBy.map((source) => stored.plan.entries.find((entry) => entry.relativePath === source))
         .find((entry) => entry && journal?.entries[entry.id]?.phase === 'object' || entry && journal?.entries[entry.id]?.status === 'complete')
       if (!parentEntry) continue
       try {
         const bytes = await vault.readAsset(attachment.relativePath, capability.upload.maxBytes)
+        if (digest(bytes) !== attachment.sourceHash) throw new Error('attachment source changed')
         const uploaded = await dependencies.uploadAttachment({
           workspaceId: stored.plan.workspaceId, objectId: parentEntry.objectId,
           fileName: path.posix.basename(attachment.relativePath), mimeType: mimeType(attachment.relativePath), bytes,
-          idempotencyKey: `obsidian:${digest(`${stored.plan.planHash}:${attachment.sourceHash}`).slice(0, 64)}`,
+          idempotencyKey: `obsidian:${digest(`${stored.plan.planHash}:${attachment.relativePath}:${attachment.sourceHash}`).slice(0, 64)}`,
         })
-        journal.attachments[key] = { attachmentId: uploaded.id, parentObjectId: parentEntry.objectId, status: 'complete' }
+        journal.attachments[key] = { attachmentId: uploaded.id, parentObjectId: parentEntry.objectId, url: uploaded.url, status: 'complete' }
       } catch (error) {
         const code = safeErrorCode(error); journal.attachments[key] = { attachmentId: '', parentObjectId: parentEntry.objectId, status: 'failed', errorCode: code }; warnings.push({ code })
       }
@@ -308,8 +371,8 @@ export async function runObsidianImportBatch(
 
   const attachmentDestinations = new Map<string, AttachmentDestination>()
   for (const attachment of stored.analysis.attachments) {
-    const saved = journal.attachments[`attachment_${attachment.sourceHash}`]
-    if (saved?.status === 'complete') attachmentDestinations.set(attachment.relativePath, { attachmentId: saved.attachmentId, url: `/api/files/attachments/${saved.attachmentId}/${encodeURIComponent(path.posix.basename(attachment.relativePath))}` })
+    const saved = journal.attachments[attachmentJournalKey(attachment)]
+    if (saved?.status === 'complete' && saved.url) attachmentDestinations.set(attachment.relativePath, { attachmentId: saved.attachmentId, url: saved.url })
   }
   const objectIdsByPath = new Map(stored.plan.entries.map((entry) => [entry.relativePath, entry.objectId]))
   for (const entry of pending) {
@@ -319,16 +382,31 @@ export async function runObsidianImportBatch(
       if (entry.kind === 'canvas') {
         const canvas = stored.analysis.canvases.find((candidate) => candidate.relativePath === entry.relativePath)
         if (!canvas) throw new Error('canvas missing')
-        const converted = convertObsidianCanvas(canvas, { objectIdsByPath, attachmentsByPath: attachmentDestinations })
+        if (stored.plan.attachmentPolicy === 'referenced') {
+          const missingAttachment = stored.analysis.attachments.find(
+            (attachment) => attachment.referencedBy.includes(entry.relativePath)
+              && journal.attachments[attachmentJournalKey(attachment)]?.status !== 'complete',
+          )
+          if (missingAttachment) throw new Error('attachment prerequisite failed')
+        }
+        const converted = convertObsidianCanvas(canvas, { objectIdsByPath, attachmentsByPath: attachmentDestinations, unsupportedPolicy: stored.plan.unsupportedPolicy })
         await dependencies.setContent(stored.plan.workspaceId, entry.objectId, converted.content)
         if (converted.warnings.length) state.warningCodes.push('canvas_fidelity_warning')
       } else {
         const note = stored.analysis.notes.find((candidate) => candidate.relativePath === entry.relativePath)
         if (!note) throw new Error('note missing')
+        if (stored.plan.attachmentPolicy === 'referenced') {
+          const missingAttachment = stored.analysis.attachments.find(
+            (attachment) => attachment.referencedBy.includes(entry.relativePath)
+              && journal.attachments[attachmentJournalKey(attachment)]?.status !== 'complete',
+          )
+          if (missingAttachment) throw new Error('attachment prerequisite failed')
+        }
         const converted = convertObsidianMarkdown(note.body, {
           sourcePath: note.relativePath, objectIdsByPath,
           resolvedLinks: stored.analysis.links.filter((link) => link.sourcePath === note.relativePath),
           attachmentsByPath: attachmentDestinations,
+          unsupportedPolicy: stored.plan.unsupportedPolicy,
         })
         await dependencies.setContent(stored.plan.workspaceId, entry.objectId, converted.document)
         if (converted.warnings.length) state.warningCodes.push('markdown_fidelity_warning')
@@ -349,9 +427,9 @@ export async function runObsidianImportBatch(
         journal.updatedAt = dependencies.now().toISOString(); await writeImportJournal(stateDir, journal); break
       }
     }
-    journal.cursor = Math.max(journal.cursor, stored.plan.entries.findIndex((candidate) => candidate.id === entry.id) + 1)
     journal.updatedAt = dependencies.now().toISOString(); await writeImportJournal(stateDir, journal)
   }
+  journal.cursor = selection.nextCursor
   const result = resultFromJournal(stored, journal, warnings)
   journal.updatedAt = dependencies.now().toISOString(); await writeImportJournal(stateDir, journal)
   return result

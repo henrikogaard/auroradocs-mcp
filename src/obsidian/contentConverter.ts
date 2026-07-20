@@ -7,6 +7,7 @@ export type MarkdownConversionContext = {
   objectIdsByPath: Map<string, string>
   resolvedLinks: ResolvedVaultLink[]
   attachmentsByPath: Map<string, AttachmentDestination>
+  unsupportedPolicy?: 'preserve' | 'skip'
 }
 export type MarkdownConversionResult = {
   document: Record<string, unknown>
@@ -18,6 +19,12 @@ type JsonNode = { type: string; attrs?: Record<string, unknown>; marks?: Array<{
 
 function textNode(text: string, marks?: JsonNode['marks']): JsonNode {
   return { type: 'text', text, ...(marks?.length ? { marks } : {}) }
+}
+
+function markdownDestination(value: string): string {
+  const trimmed = value.trim()
+  const match = /^(?:<([^>]+)>|(\S+?))(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?$/.exec(trimmed)
+  return (match?.[1] ?? match?.[2] ?? trimmed).trim()
 }
 
 function inlineNodes(source: string, context: MarkdownConversionContext, warnings: string[], attachmentIds: Set<string>): JsonNode[] {
@@ -46,8 +53,8 @@ function inlineNodes(source: string, context: MarkdownConversionContext, warning
             nodes.push(textNode(wiki.alias ?? wiki.target, [{ type: 'link', attrs: { href: `/object/${objectId}` } }]))
             warnings.push(`Embedded note ${wiki.target} became an object link.`)
           } else {
-            nodes.push(textNode(raw))
-            warnings.push(`Unresolved attachment embed ${wiki.target} was preserved as readable text.`)
+            if (context.unsupportedPolicy !== 'skip') nodes.push(textNode(raw))
+            warnings.push(`Unresolved attachment embed ${wiki.target} was ${context.unsupportedPolicy === 'skip' ? 'skipped' : 'preserved as readable text'}.`)
           }
         }
       } else {
@@ -58,24 +65,40 @@ function inlineNodes(source: string, context: MarkdownConversionContext, warning
           nodes.push(textNode(label, [{ type: 'link', attrs: { href: `/object/${objectId}` } }]))
           if (wiki.anchor) warnings.push(`Anchor ${wiki.anchor} on ${wiki.target} was reduced to an object-level link.`)
         } else {
-          nodes.push(textNode(label))
-          warnings.push(`${resolved?.status === 'ambiguous' ? 'Ambiguous' : 'Broken'} wiki link ${wiki.target} was preserved as readable text.`)
+          if (context.unsupportedPolicy !== 'skip') nodes.push(textNode(label))
+          warnings.push(`${resolved?.status === 'ambiguous' ? 'Ambiguous' : 'Broken'} wiki link ${wiki.target} was ${context.unsupportedPolicy === 'skip' ? 'skipped' : 'preserved as readable text'}.`)
         }
       }
     } else if (raw.startsWith('![')) {
       const image = /^!\[([^\]]*)\]\(([^)]+)\)$/.exec(raw)
-      const target = image?.[2]?.trim().replace(/^<|>$/g, '') ?? ''
+      const target = image?.[2] ? markdownDestination(image[2]) : ''
       const assetPath = context.attachmentsByPath.has(target) ? target : safeVaultReference(context.sourcePath, target)
       const attachment = assetPath ? context.attachmentsByPath.get(assetPath) : undefined
       if (attachment) {
         attachmentIds.add(attachment.attachmentId)
         nodes.push({ type: 'attachment', attrs: { id: attachment.attachmentId, href: attachment.url, label: image?.[1] || target } })
       } else {
-        nodes.push(textNode(raw)); warnings.push(`Unresolved attachment ${target} was preserved as readable text.`)
+        if (context.unsupportedPolicy !== 'skip') nodes.push(textNode(raw))
+        warnings.push(`Unresolved attachment ${target} was ${context.unsupportedPolicy === 'skip' ? 'skipped' : 'preserved as readable text'}.`)
       }
     } else if (raw.startsWith('[')) {
       const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(raw)
-      nodes.push(textNode(link?.[1] ?? raw, link ? [{ type: 'link', attrs: { href: link[2] } }] : undefined))
+      if (!link) nodes.push(textNode(raw))
+      else {
+        const target = markdownDestination(link[2])
+        const localPath = safeVaultReference(context.sourcePath, target)
+        const objectId = context.objectIdsByPath.get(target) ?? (localPath ? context.objectIdsByPath.get(localPath) : undefined)
+        const attachment = context.attachmentsByPath.get(target) ?? (localPath ? context.attachmentsByPath.get(localPath) : undefined)
+        if (objectId) nodes.push(textNode(link[1], [{ type: 'link', attrs: { href: `/object/${objectId}` } }]))
+        else if (attachment) {
+          attachmentIds.add(attachment.attachmentId)
+          nodes.push(textNode(link[1], [{ type: 'link', attrs: { href: attachment.url } }]))
+        } else if (/^(?:https?:|mailto:|tel:|#|\/)/i.test(target)) nodes.push(textNode(link[1], [{ type: 'link', attrs: { href: target } }]))
+        else {
+          if (context.unsupportedPolicy !== 'skip') nodes.push(textNode(link[1]))
+          warnings.push(`Unresolved local Markdown link ${target} was ${context.unsupportedPolicy === 'skip' ? 'skipped' : 'preserved as readable text'}.`)
+        }
+      }
     } else if (raw.startsWith('**') || raw.startsWith('__')) {
       nodes.push(textNode(raw.slice(2, -2), [{ type: 'bold' }]))
     } else if (raw.startsWith('`')) {
@@ -108,6 +131,10 @@ export function convertObsidianMarkdown(markdown: string, context: MarkdownConve
       while (index < lines.length && !/^```\s*$/.test(lines[index] ?? '')) { code.push(lines[index] ?? ''); index += 1 }
       if (index < lines.length) index += 1
       else warnings.push('Unclosed fenced code block was preserved.')
+      if (context.unsupportedPolicy === 'skip' && /^(?:dataview|dataviewjs|javascript|js)$/i.test(fence[1] ?? '')) {
+        warnings.push(`Dynamic ${fence[1] || 'plugin'} block was skipped.`)
+        continue
+      }
       content.push({ type: 'codeBlock', attrs: { language: fence[1] || null }, content: code.length ? [textNode(code.join('\n'))] : [] })
       continue
     }

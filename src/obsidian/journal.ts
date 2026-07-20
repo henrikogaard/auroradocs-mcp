@@ -27,7 +27,7 @@ export type ImportJournal = {
   groups: Record<string, { objectTypeId: string; status: 'pending' | 'complete' | 'failed'; errorCode?: string }>
   containers: Record<string, { objectId: string; status: 'pending' | 'complete' | 'failed'; errorCode?: string }>
   entries: Record<string, ImportJournalItem>
-  attachments: Record<string, { attachmentId: string; parentObjectId: string; status: 'pending' | 'complete' | 'failed'; errorCode?: string }>
+  attachments: Record<string, { attachmentId: string; parentObjectId: string; url?: string; status: 'pending' | 'complete' | 'failed'; errorCode?: string }>
   startedAt: string
   updatedAt: string
 }
@@ -137,7 +137,13 @@ export async function readImportJournal(stateDir: string, planId: string): Promi
 }
 
 export function summarizeImportJournal(
-  plan: { planId: string; planHash: string; entries: unknown[] },
+  plan: {
+    planId: string
+    planHash: string
+    entries: unknown[]
+    attachmentPolicy?: 'referenced' | 'skip'
+    counts?: { attachments: number }
+  },
   journal: ImportJournal | null,
 ): ObsidianImportStatus {
   if (!journal) {
@@ -149,8 +155,10 @@ export function summarizeImportJournal(
     }
   }
   const entries = Object.values(journal.entries)
+  const attachments = Object.values(journal.attachments)
   const completed = entries.filter((entry) => entry.status === 'complete').length
   const failed = entries.filter((entry) => entry.status === 'failed').length
+    + attachments.filter((entry) => entry.status === 'failed').length
   const warningCodes = new Set<string>()
   for (const entry of entries) {
     entry.warningCodes.forEach((code) => warningCodes.add(code))
@@ -159,7 +167,10 @@ export function summarizeImportJournal(
   for (const collection of [journal.groups, journal.containers, journal.attachments]) {
     for (const item of Object.values(collection)) if (item.errorCode) warningCodes.add(item.errorCode)
   }
+  const expectedAttachments = plan.attachmentPolicy === 'referenced' ? plan.counts?.attachments ?? 0 : 0
+  const completedAttachments = attachments.filter((entry) => entry.status === 'complete').length
   const remaining = Math.max(0, plan.entries.length - completed)
+    + Math.max(0, expectedAttachments - completedAttachments)
   return {
     status: journal.status, planId: plan.planId, planHash: plan.planHash,
     completed, failed, remaining,

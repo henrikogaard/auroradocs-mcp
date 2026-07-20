@@ -4,6 +4,30 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Hardened Obsidian import prerequisites and recovery: failed custom types or
+  parent containers no longer downgrade or flatten entries, failed entries no
+  longer strand later batches, attachment failures remain retryable and prevent
+  false completion, quota preflight counts only pending uploads, and approved
+  plans resume from private persisted metadata after an MCP restart.
+- Made `unsupported_policy: skip` omit dynamic Markdown fallbacks and unsupported
+  Canvas nodes, preserved Canvas-only folder hierarchy and merged-group schemas,
+  stripped Markdown image titles before attachment lookup, and marked each
+  batch-advancing import call non-idempotent at the MCP tool boundary.
+- Filtered templates before pagination, copied all 64 bounded template defaults,
+  normalized null optional fields for stable retries, and preserved existing
+  requiredness during additive schema updates.
+- Skipped unimportable frontmatter keys while preserving template identity,
+  bounded aggregate vault source memory, blocked ignored-path attachments,
+  keyed duplicate-byte attachments by path, verified live bytes, persisted the
+  canonical upload URL, stored Canvas dimensions compatibly, resolved local
+  Markdown links, rejected unsupported template default types before writes,
+  cleared obsolete property columns, and paged through all object types.
+- Kept inferred frontmatter values out of persisted schemas, validated merged
+  schemas before approval, held Canvas content until every referenced attachment
+  completed, and returned an actionable stale-plan error after restart drift.
+
 ## [0.2.1] - 2026-07-20
 
 ### Added

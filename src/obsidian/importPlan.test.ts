@@ -1,5 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { cp, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { analyzeObsidianVault } from './analyzer.js'
 import { resolveObsidianConfig } from './config.js'
@@ -7,7 +10,9 @@ import { openAuthorizedVault } from './vaultAccess.js'
 import {
   assertCurrentObsidianImportPlan,
   buildObsidianImportPlan,
+  clearStoredObsidianImportPlansForTests,
   getObsidianImportPlanPage,
+  writeObsidianImportPlan,
 } from './importPlan.js'
 import { executeToolCall } from '../tools.js'
 
@@ -72,6 +77,102 @@ test('group adjustments are enum-bound and rename, merge, split, or reject deter
   }), /unknown group/i)
 })
 
+test('merge adjustments union source schema fields into the target group', async () => {
+  const analysis = await fixtureAnalysis()
+  const baseline = buildObsidianImportPlan(analysis, 'workspace-1', {
+    ids: { planId: 'obsidian-plan-merge-base' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const source = baseline.groups.find((group) => group.name === 'Contacts')!
+  const target = baseline.groups.find((group) => group.name === 'Equipment')!
+  const sourceOnlyKey = source.schema.find((field) => !target.schema.some((candidate) => candidate.key === field.key))?.key
+  assert.ok(sourceOnlyKey)
+
+  const merged = buildObsidianImportPlan(analysis, 'workspace-1', {
+    ids: { planId: 'obsidian-plan-merge' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+    adjustments: [{ groupId: source.id, action: 'merge', mergeWithGroupId: target.id }],
+  })
+  const mergedTarget = merged.groups.find((group) => group.id === target.id)!
+  assert.ok(mergedTarget.schema.some((field) => field.key === sourceOnlyKey))
+})
+
+test('container planning includes folders that contain only Canvas files', async () => {
+  const analysis = await fixtureAnalysis()
+  const canvas = analysis.canvases[0]!
+  const canvasOnly = {
+    ...analysis,
+    canvases: [{ ...canvas, relativePath: 'CanvasOnly/Nested/Map.canvas' }],
+  }
+  const plan = buildObsidianImportPlan(canvasOnly, 'workspace-1', {
+    ids: { planId: 'obsidian-plan-canvas-folders' }, hierarchyPolicy: 'spaces',
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  assert.ok(plan.containers.some((container) => container.folder === 'CanvasOnly'))
+  assert.ok(plan.containers.some((container) => container.folder === 'CanvasOnly/Nested'))
+})
+
+test('template mapping survives absent group inference and invalid frontmatter keys are skipped', async () => {
+  const analysis = await fixtureAnalysis()
+  const source = analysis.notes[0]!
+  const templatePath = 'Templates/Generic.md'
+  const adjusted = {
+    ...analysis,
+    notes: [...analysis.notes, {
+      ...source,
+      relativePath: templatePath,
+      folder: 'Templates',
+      sourceHash: 'generic-template-hash',
+      isTemplate: true,
+      frontmatter: { '---': 'ignored', ['x'.repeat(80)]: 'ignored' },
+      frontmatterShapes: { '---': 'string' as const },
+    }],
+  }
+  const plan = buildObsidianImportPlan(adjusted, 'workspace-1', {
+    ids: { planId: 'obsidian-plan-template-independent' },
+    now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const entry = plan.entries.find((candidate) => candidate.relativePath === templatePath)
+  assert.equal(entry?.mapping, 'template')
+  assert.equal(entry?.groupId, null)
+})
+
+test('persisted inferred schemas exclude observed frontmatter values', async () => {
+  const analysis = await fixtureAnalysis()
+  const source = analysis.notes[0]!
+  const notes = ['Acme Secret', 'Beta Secret'].map((client, index) => ({
+    ...source,
+    relativePath: `Clients/${index}.md`, folder: 'Clients', sourceHash: `client-${index}`,
+    frontmatter: { type: 'clients', client }, frontmatterShapes: { type: 'string' as const, client: 'string' as const },
+  }))
+  const plan = buildObsidianImportPlan({ ...analysis, notes, links: [], attachments: [], canvases: [] }, 'workspace-1', {
+    ids: { planId: 'plan-content-free-schema' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  const clientField = plan.groups[0]?.schema.find((field) => field.key === 'client')
+  assert.equal(clientField?.value_type, 'text')
+  assert.equal(clientField?.options, undefined)
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'aurora-plan-values-'))
+  const file = await writeObsidianImportPlan(stateDir, plan)
+  assert.doesNotMatch(await readFile(file, 'utf8'), /Acme Secret|Beta Secret/)
+})
+
+test('merged inferred schemas are validated before a plan is returned', async () => {
+  const analysis = await fixtureAnalysis()
+  const source = analysis.notes[0]!
+  const makeNote = (group: string, prefix: string) => ({
+    ...source,
+    relativePath: `${group}.md`, folder: '', sourceHash: `${group}-hash`,
+    frontmatter: Object.fromEntries([['type', group], ...Array.from({ length: 33 }, (_, index) => [`${prefix}_${index}`, index])]),
+    frontmatterShapes: {},
+  })
+  const prepared = { ...analysis, notes: [makeNote('first', 'a'), makeNote('second', 'b')], links: [], attachments: [], canvases: [] }
+  const baseline = buildObsidianImportPlan(prepared, 'workspace-1', {
+    ids: { planId: 'merge-overflow-base' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+  })
+  assert.throws(() => buildObsidianImportPlan(prepared, 'workspace-1', {
+    ids: { planId: 'merge-overflow' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z',
+    adjustments: [{ groupId: baseline.groups[0]!.id, action: 'merge', mergeWithGroupId: baseline.groups[1]!.id }],
+  }), /64/)
+})
+
 test('plan validation rejects foreign, expired, tampered, root-changed, and inventory-changed plans', async () => {
   const analysis = await fixtureAnalysis()
   const plan = buildObsidianImportPlan(analysis, 'workspace-1', {
@@ -103,5 +204,64 @@ test('analysis and plan paging tools remain local, bounded, and content-free', a
   } finally {
     if (previousRoot === undefined) delete process.env['AURORA_OBSIDIAN_VAULT_ROOT']; else process.env['AURORA_OBSIDIAN_VAULT_ROOT'] = previousRoot
     globalThis.fetch = previousFetch
+  }
+})
+
+test('approved plans survive an MCP process restart without persisting vault content', async () => {
+  const previousRoot = process.env['AURORA_OBSIDIAN_VAULT_ROOT']
+  const previousStateDir = process.env['AURORA_MCP_STATE_DIR']
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'aurora-plan-restart-'))
+  process.env['AURORA_OBSIDIAN_VAULT_ROOT'] = fixtureRoot
+  process.env['AURORA_MCP_STATE_DIR'] = stateDir
+  try {
+    const analyzed = await executeToolCall('analyze_obsidian_vault', {}, 'workspace-restart')
+    assert.equal(analyzed.type, 'obsidian_import_plan')
+    if (analyzed.type !== 'obsidian_import_plan') return
+    const planFile = (await readdir(stateDir)).find((entry) => entry.startsWith('obsidian-plan-'))
+    assert.ok(planFile)
+    const persisted = await readFile(path.join(stateDir, planFile), 'utf8')
+    assert.equal((await stat(path.join(stateDir, planFile))).mode & 0o777, 0o600)
+    assert.doesNotMatch(persisted, /ada@example\.test|Template body|Analytical Engines|aur_mcp_|AURORA_API_TOKEN/)
+    clearStoredObsidianImportPlansForTests()
+
+    const resumed = await executeToolCall('get_obsidian_import_plan', {
+      plan_id: analyzed.plan.planId, section: 'entries', per_page: 1,
+    }, 'workspace-restart')
+    assert.equal(resumed.type, 'obsidian_import_plan_page')
+    assert.doesNotMatch(JSON.stringify(resumed), /ada@example\.test|Template body|Analytical Engines/)
+  } finally {
+    if (previousRoot === undefined) delete process.env['AURORA_OBSIDIAN_VAULT_ROOT']; else process.env['AURORA_OBSIDIAN_VAULT_ROOT'] = previousRoot
+    if (previousStateDir === undefined) delete process.env['AURORA_MCP_STATE_DIR']; else process.env['AURORA_MCP_STATE_DIR'] = previousStateDir
+    clearStoredObsidianImportPlansForTests()
+  }
+})
+
+test('reloaded plans return an actionable stale-plan error after vault drift', async () => {
+  const previousRoot = process.env['AURORA_OBSIDIAN_VAULT_ROOT']
+  const previousStateDir = process.env['AURORA_MCP_STATE_DIR']
+  const root = await mkdtemp(path.join(tmpdir(), 'aurora-plan-stale-'))
+  const vaultRoot = path.join(root, 'Vault')
+  const stateDir = path.join(root, 'state')
+  await cp(fixtureRoot, vaultRoot, { recursive: true })
+  process.env['AURORA_OBSIDIAN_VAULT_ROOT'] = vaultRoot
+  process.env['AURORA_MCP_STATE_DIR'] = stateDir
+  try {
+    const analyzed = await executeToolCall('analyze_obsidian_vault', {}, 'workspace-stale')
+    assert.equal(analyzed.type, 'obsidian_import_plan')
+    if (analyzed.type !== 'obsidian_import_plan') return
+    clearStoredObsidianImportPlansForTests()
+    await writeFile(path.join(vaultRoot, 'Home.md'), '# Changed after approval\n')
+
+    const resumed = await executeToolCall('get_obsidian_import_plan', {
+      plan_id: analyzed.plan.planId,
+    }, 'workspace-stale')
+    assert.equal(resumed.type, 'error')
+    if (resumed.type !== 'error') return
+    assert.equal(resumed.code, 'invalid_input')
+    assert.equal(resumed.message, 'Obsidian import plan is stale; analyze the vault again')
+  } finally {
+    if (previousRoot === undefined) delete process.env['AURORA_OBSIDIAN_VAULT_ROOT']; else process.env['AURORA_OBSIDIAN_VAULT_ROOT'] = previousRoot
+    if (previousStateDir === undefined) delete process.env['AURORA_MCP_STATE_DIR']; else process.env['AURORA_MCP_STATE_DIR'] = previousStateDir
+    clearStoredObsidianImportPlansForTests()
   }
 })

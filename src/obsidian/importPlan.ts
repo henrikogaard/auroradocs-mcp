@@ -1,5 +1,7 @@
-import { createHash } from 'node:crypto'
-import { newAuroraId, type CustomDatabaseRecipeId, type ObjectTypeSchema } from '../customDatabases.js'
+import { createHash, randomBytes } from 'node:crypto'
+import { chmod, lstat, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
+import path from 'node:path'
+import { newAuroraId, validateCustomDatabaseSchema, type CustomDatabaseRecipeId, type ObjectTypeSchema } from '../customDatabases.js'
 import type { VaultAnalysis } from './analyzer.js'
 import { inferObsidianGroups, type InferredGroup } from './inference.js'
 
@@ -90,6 +92,7 @@ export type ObsidianImportPlanPreview = {
 }
 
 const PLAN_STORE = new Map<string, StoredObsidianImportPlan>()
+const PLAN_MAX_BYTES = 5 * 1024 * 1024
 
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical)
@@ -125,6 +128,24 @@ function initialGroups(inferred: InferredGroup[]): ObsidianImportGroup[] {
   }))
 }
 
+function mergeGroupSchemas(target: ObjectTypeSchema[], source: ObjectTypeSchema[]): ObjectTypeSchema[] {
+  const merged = target.map((field) => ({ ...field, ...(field.options ? { options: [...field.options] } : {}) }))
+  const byKey = new Map(merged.map((field) => [field.key, field]))
+  for (const field of source) {
+    const existing = byKey.get(field.key)
+    if (!existing) {
+      const copy = { ...field, ...(field.options ? { options: [...field.options] } : {}) }
+      merged.push(copy)
+      byKey.set(copy.key, copy)
+      continue
+    }
+    if (existing.value_type === field.value_type && (existing.options || field.options)) {
+      existing.options = [...new Set([...(existing.options ?? []), ...(field.options ?? [])])]
+    }
+  }
+  return merged
+}
+
 function applyAdjustments(
   groups: ObsidianImportGroup[],
   noteMembership: Map<string, string>,
@@ -151,6 +172,7 @@ function applyAdjustments(
       target.noteCount += group.noteCount
       target.samplePaths = [...new Set([...target.samplePaths, ...group.samplePaths])].slice(0, 5)
       target.evidence.push(`Merged from ${group.name} by approved adjustment.`)
+      target.schema = validateCustomDatabaseSchema(mergeGroupSchemas(target.schema, group.schema))
       group.decision = 'reject'
     }
     if (adjustment.action === 'split') {
@@ -202,7 +224,7 @@ export function buildObsidianImportPlan(analysis: VaultAnalysis, workspaceId: st
       return {
         id: `entry_${hash(`${planId}:${note.relativePath}:${note.sourceHash}`).slice(0, 12)}`,
         relativePath: note.relativePath, sourceHash: note.sourceHash, kind: 'note' as const,
-        mapping: note.isTemplate && accepted ? 'template' as const : accepted ? 'custom' as const : 'page' as const,
+        mapping: note.isTemplate ? 'template' as const : accepted ? 'custom' as const : 'page' as const,
         groupId: accepted ? group?.id ?? null : null,
         objectId: newAuroraId(),
       }
@@ -213,7 +235,15 @@ export function buildObsidianImportPlan(analysis: VaultAnalysis, workspaceId: st
       mapping: 'canvas' as const, groupId: null, objectId: newAuroraId(),
     })),
   ].sort((left, right) => left.relativePath.localeCompare(right.relativePath, 'en'))
-  const folders = [...new Set(analysis.notes.map((note) => note.folder).filter(Boolean))]
+  const folders = [...new Set([
+    ...analysis.notes.map((note) => note.folder),
+    ...analysis.canvases.map((canvas) => {
+      const folder = canvas.relativePath.includes('/')
+        ? canvas.relativePath.slice(0, canvas.relativePath.lastIndexOf('/'))
+        : ''
+      return folder
+    }),
+  ].filter(Boolean))]
   const allFolders = new Set<string>()
   for (const folder of folders) {
     const segments = folder.split('/')
@@ -266,6 +296,83 @@ export function storeObsidianImportPlan(plan: ObsidianImportPlan, analysis: Vaul
 }
 export function getStoredObsidianImportPlan(workspaceId: string, planId: string): StoredObsidianImportPlan | null {
   return PLAN_STORE.get(`${workspaceId}:${planId}`) ?? null
+}
+
+export function clearStoredObsidianImportPlansForTests(): void {
+  PLAN_STORE.clear()
+}
+
+function persistedPlanFileName(planId: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(planId)) throw new Error('Invalid Obsidian import plan ID')
+  return `obsidian-plan-${planId}.json`
+}
+
+async function ensurePlanStateDirectory(stateDir: string): Promise<void> {
+  await mkdir(stateDir, { recursive: true, mode: 0o700 })
+  const info = await lstat(stateDir)
+  if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('MCP state path must be a real directory')
+  await chmod(stateDir, 0o700)
+}
+
+function assertPersistedPlan(value: unknown): asserts value is ObsidianImportPlan {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid persisted Obsidian import plan')
+  const plan = value as Partial<ObsidianImportPlan>
+  if (
+    plan.version !== OBSIDIAN_IMPORT_PLAN_VERSION
+    || typeof plan.planId !== 'string'
+    || typeof plan.planHash !== 'string'
+    || typeof plan.workspaceId !== 'string'
+    || !Array.isArray(plan.groups)
+    || !Array.isArray(plan.containers)
+    || !Array.isArray(plan.entries)
+    || typeof plan.createdAt !== 'string'
+    || typeof plan.expiresAt !== 'string'
+    || !Number.isFinite(Date.parse(plan.createdAt))
+    || !Number.isFinite(Date.parse(plan.expiresAt))
+    || Date.parse(plan.expiresAt) <= Date.parse(plan.createdAt)
+    || hashObsidianImportPlan(plan as ObsidianImportPlan) !== plan.planHash
+  ) throw new Error('Invalid persisted Obsidian import plan')
+}
+
+export async function writeObsidianImportPlan(stateDir: string, plan: ObsidianImportPlan): Promise<string> {
+  assertPersistedPlan(plan)
+  await ensurePlanStateDirectory(stateDir)
+  const destination = path.join(stateDir, persistedPlanFileName(plan.planId))
+  const temporary = path.join(stateDir, `.${persistedPlanFileName(plan.planId)}.${randomBytes(8).toString('hex')}.tmp`)
+  const serialized = `${JSON.stringify(plan, null, 2)}\n`
+  if (Buffer.byteLength(serialized) > PLAN_MAX_BYTES) throw new Error('Obsidian import plan exceeds its safety limit')
+  const handle = await open(temporary, 'wx', 0o600)
+  try {
+    await handle.writeFile(serialized, 'utf8')
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+  try {
+    await rename(temporary, destination)
+    await chmod(destination, 0o600)
+  } catch (error) {
+    await unlink(temporary).catch(() => {})
+    throw error
+  }
+  return destination
+}
+
+export async function readObsidianImportPlan(stateDir: string, planId: string): Promise<ObsidianImportPlan | null> {
+  const file = path.join(stateDir, persistedPlanFileName(planId))
+  let serialized: string
+  try {
+    const info = await lstat(file)
+    if (info.isSymbolicLink() || !info.isFile() || info.size > PLAN_MAX_BYTES) throw new Error('Invalid persisted Obsidian import plan file')
+    serialized = await readFile(file, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  const value = JSON.parse(serialized) as unknown
+  assertPersistedPlan(value)
+  if (value.planId !== planId) throw new Error('Persisted Obsidian import plan mismatch')
+  return value
 }
 
 export function getObsidianImportPlanPage(plan: ObsidianImportPlan, section: 'groups' | 'entries' | 'warnings', page = 1, perPage = 50) {

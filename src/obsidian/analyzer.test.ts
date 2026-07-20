@@ -5,7 +5,8 @@ import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseFrontmatter } from './frontmatter.js'
-import { analyzeObsidianVault, summarizeVaultAnalysis } from './analyzer.js'
+import { analyzeObsidianVault, OBSIDIAN_VAULT_TOTAL_SOURCE_MAX_BYTES, summarizeVaultAnalysis } from './analyzer.js'
+import type { AuthorizedVault } from './vaultAccess.js'
 import { openAuthorizedVault } from './vaultAccess.js'
 import { resolveObsidianConfig } from './config.js'
 
@@ -69,4 +70,17 @@ test('analysis inventories notes, templates, tags, links, attachments, and Canva
   } finally {
     globalThis.fetch = previousFetch
   }
+})
+
+test('analysis rejects an oversized aggregate source inventory before reading files', async () => {
+  let reads = 0
+  const vault = {
+    listSourceFiles: async () => [
+      { relativePath: 'one.md', kind: 'markdown' as const, sizeBytes: OBSIDIAN_VAULT_TOTAL_SOURCE_MAX_BYTES },
+      { relativePath: 'two.md', kind: 'markdown' as const, sizeBytes: 1 },
+    ],
+    readText: async () => { reads += 1; throw new Error('must not read') },
+  } as unknown as AuthorizedVault
+  await assert.rejects(() => analyzeObsidianVault(vault), /256 MiB/i)
+  assert.equal(reads, 0)
 })

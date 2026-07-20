@@ -19,6 +19,9 @@ test('Canvas conversion maps text, file, web, group nodes and remaps colliding I
   assert.ok(result.content.cards.some((card) => card.objectId === 'object-ada'))
   assert.ok(result.content.cards.some((card) => card.url === 'https://example.test'))
   assert.equal(result.content.frames[0]?.label, 'Context')
+  assert.equal(result.content.cards[0]?.w, 200)
+  assert.equal(result.content.cards[0]?.h, 100)
+  assert.equal(Object.hasOwn(result.content.cards[0] ?? {}, 'width'), false)
   assert.ok(result.warnings.some((warning) => /duplicate|collid/i.test(warning)))
 })
 
@@ -32,4 +35,21 @@ test('unsupported and unresolved Canvas nodes remain readable and produce warnin
   }, { objectIdsByPath: new Map(), attachmentsByPath: new Map() })
   assert.match(JSON.stringify(result.content), /Assets\/missing\.pdf|custom-plugin/)
   assert.ok(result.warnings.length >= 2)
+})
+
+test('unsupported skip policy omits unsupported and unresolved Canvas nodes', () => {
+  const context = { objectIdsByPath: new Map(), attachmentsByPath: new Map(), unsupportedPolicy: 'skip' as const }
+  const result = convertObsidianCanvas({
+    relativePath: 'Map.canvas', title: 'Map', sourceHash: 'hash', warnings: [], referencedPaths: [],
+    nodes: [
+      { id: 'missing', type: 'file', file: 'Assets/missing.pdf' },
+      { id: 'plugin', type: 'custom-plugin', data: 'skip me' },
+      { id: 'text', type: 'text', text: 'Keep me' },
+    ], edges: [{ id: 'skipped-edge', fromNode: 'plugin', toNode: 'text' }],
+  }, context)
+  const serialized = JSON.stringify(result.content)
+  assert.match(serialized, /Keep me/)
+  assert.doesNotMatch(serialized, /missing\.pdf|custom-plugin/)
+  assert.equal(result.content.edges.length, 0)
+  assert.ok(result.warnings.some((warning) => /skipped/i.test(warning)))
 })

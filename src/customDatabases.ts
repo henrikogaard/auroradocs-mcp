@@ -276,7 +276,7 @@ export function validateAdditiveObjectTypePatch(currentSchema: ObjectTypeSchema[
     const replacement = nextByKey.get(fieldValue.key)
     if (!replacement) throw new Error(`Additive schema updates cannot remove property "${fieldValue.key}"`)
     if (replacement.value_type !== fieldValue.value_type) throw new Error(`Additive schema updates cannot change the value type of "${fieldValue.key}"`)
-    if (!fieldValue.required && replacement.required) throw new Error(`Additive schema updates cannot make "${fieldValue.key}" required`)
+    if (fieldValue.required !== replacement.required) throw new Error(`Additive schema updates cannot change requiredness for "${fieldValue.key}"`)
     if ((replacement.storageType ?? null) !== (fieldValue.storageType ?? null)) throw new Error(`Additive schema updates cannot change storage mapping for "${fieldValue.key}"`)
     if ((replacement.targetType ?? null) !== (fieldValue.targetType ?? null)) throw new Error(`Additive schema updates cannot retarget relation "${fieldValue.key}"`)
     if ((replacement.sensitive ?? false) !== (fieldValue.sensitive ?? false)) throw new Error(`Additive schema updates cannot change sensitive metadata for "${fieldValue.key}"`)

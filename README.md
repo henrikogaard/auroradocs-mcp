@@ -98,7 +98,7 @@ New client credentials require these environment variables:
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
 | `AURORA_OBSIDIAN_VAULT_ROOT` | optional absolute path authorizing read-only analysis of one Obsidian vault (`0.2.1` source; not yet published) |
-| `AURORA_MCP_STATE_DIR` | optional private import-journal directory outside that vault (`0.2.1` source; not yet published) |
+| `AURORA_MCP_STATE_DIR` | optional private plan/journal directory outside that vault (`0.2.1` source; not yet published) |
 
 Do not set `AURORA_WORKSPACE_ID` for a client credential. The server discovers
 only its owner-approved grants with `list_workspaces`; each data call then
@@ -204,10 +204,15 @@ and send the exact plan ID/hash with `confirmed: true`. Decline, cancel,
 malformed confirmation, stale source state, missing scopes, viewer access, and
 E2EE all stop before AuroraDocs writes.
 
-Imports run in resume-safe batches, keep a private content-free journal outside
-the vault, and never modify the source. Back up both systems first and start
+Imports run in resume-safe batches, keep private plan metadata plus a
+content-free progress journal outside the vault, survive MCP process restarts,
+and never modify the source. Back up both systems first and start
 with a small test workspace. See [Obsidian import](docs/obsidian-import.md) for
 configuration, mapping, consent, recovery, and fidelity limits.
+
+Analysis rejects more than 256 MiB of eligible Markdown/Canvas source files,
+and hidden, plugin, Git, cache, trash, and other ignored paths cannot be read as
+attachments even when vault content links to them.
 
 ## Verify read-only access first
 

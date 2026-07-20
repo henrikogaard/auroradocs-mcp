@@ -58,7 +58,7 @@ function isIsoDate(value: string): boolean {
 function scalarType(value: unknown): PropertyValueType {
   if (typeof value === 'boolean') return 'boolean'
   if (typeof value === 'number' && Number.isFinite(value)) return 'number'
-  if (Array.isArray(value) && value.every((entry) => typeof entry === 'string')) return 'multi_select'
+  if (Array.isArray(value)) return 'text'
   if (typeof value !== 'string') return 'text'
   const trimmed = value.trim()
   if (isIsoDate(trimmed)) return 'date'
@@ -83,8 +83,9 @@ function inferSchema(notes: AnalyzedNote[], recipeId: CustomDatabaseRecipeId | n
   for (const field of recipe?.schema ?? []) fields.set(field.key, { ...field, ...(field.options ? { options: [...field.options] } : {}) })
   const values = new Map<string, unknown[]>()
   for (const note of notes) for (const [rawKey, value] of Object.entries(note.frontmatter)) {
-    const key = normalizeSchemaKey(rawKey)
-    if (META_KEYS.has(key)) continue
+    let key: string
+    try { key = normalizeSchemaKey(rawKey) } catch { continue }
+    if (META_KEYS.has(key) || key.length > 64) continue
     values.set(key, [...(values.get(key) ?? []), value])
   }
   for (const [key, observed] of values) {
@@ -105,17 +106,6 @@ function inferSchema(notes: AnalyzedNote[], recipeId: CustomDatabaseRecipeId | n
     const label = key.split('_').map((part, index) => index === 0 ? part.charAt(0).toLocaleUpperCase() + part.slice(1) : part).join(' ')
     const field: ObjectTypeSchema = { key, label, value_type: valueType, required: false }
     if (targetType) field.targetType = targetType
-    if (valueType === 'multi_select') {
-      const options = [...new Map(observed.flatMap((value) => Array.isArray(value) ? value : []).map((value) => [String(value).toLocaleLowerCase(), String(value)])).values()].slice(0, 100)
-      if (options.length) field.options = options
-      else field.value_type = 'text'
-    }
-    if (valueType === 'text' && observed.length >= 2) {
-      const finite = [...new Map(observed.filter((value): value is string => typeof value === 'string').map((value) => [value.toLocaleLowerCase(), value])).values()]
-      if (finite.length > 0 && finite.length <= 12 && finite.every((value) => value.length <= 100)) {
-        field.value_type = 'select'; field.options = finite
-      }
-    }
     fields.set(key, field)
   }
   return validateCustomDatabaseSchema([...fields.values()].map((field) => (

@@ -48,4 +48,14 @@ test('status summary reports bounded content-free progress and next action', () 
   assert.equal(partial.remaining, 2)
   assert.deepEqual(partial.warningCodes, ['fidelity', 'rate_limited'])
   assert.match(partial.nextAction, /same plan ID and hash/)
+
+  journal.attachments['attachment-hash'] = {
+    attachmentId: '', parentObjectId: 'object-1', status: 'failed', errorCode: 'upstream_unavailable',
+  }
+  const withAttachmentFailure = summarizeImportJournal({
+    ...plan, attachmentPolicy: 'referenced', counts: { attachments: 1 },
+  }, journal)
+  assert.equal(withAttachmentFailure.failed, 2)
+  assert.equal(withAttachmentFailure.remaining, 3)
+  assert.ok(withAttachmentFailure.warningCodes.includes('upstream_unavailable'))
 })

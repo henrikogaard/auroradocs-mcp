@@ -729,7 +729,7 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
   delete_object: [resultSchema('deleted', { id: stringSchema }, ['id'])],
 }
 
-const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template'])
+const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template', 'import_obsidian_vault'])
 const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'])
 const WORKSPACE_SELECTOR_FREE_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
 
