@@ -9,8 +9,9 @@ The public package is `@henrikogard/auroradocs-mcp` and the executable is
 version is `0.2.1` and requires its package release or a local source build.
 
 For an end-to-end installation walkthrough, use the dedicated
-[Setup guide](docs/setup.md). Hermes and OpenClaw users should also apply the
-bounded [read-only agent profiles](docs/agent-profiles.md).
+[Setup guide](docs/setup.md). AI assistants and client integrators should start
+with the [Agent guide](docs/agent-guide.md); Hermes and OpenClaw users should
+also apply the bounded [read-only agent profiles](docs/agent-profiles.md).
 
 ## Requirements
 
@@ -261,6 +262,7 @@ report a vulnerability, follow [SECURITY.md](SECURITY.md).
 
 ## Reference
 
+- [Agent guide](docs/agent-guide.md)
 - [Tools and scopes](docs/tools.md)
 - [Obsidian import](docs/obsidian-import.md)
 - [Hermes and OpenClaw agent profiles](docs/agent-profiles.md)

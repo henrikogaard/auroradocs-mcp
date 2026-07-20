@@ -311,6 +311,44 @@ test('public docs explain custom databases and the consent-gated local Obsidian 
   assert.match(obsidian, /published npm package remains 0\.2\.0 and does not include these tools yet/)
 })
 
+test('packaged agent guide maps capabilities to safe, concrete workflows', async () => {
+  const [readme, setup, tools, guide] = await Promise.all([
+    readFile(new URL('../README.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/setup.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/tools.md', import.meta.url), 'utf8'),
+    readFile(new URL('../docs/agent-guide.md', import.meta.url), 'utf8'),
+  ])
+  const normalized = guide.replace(/\s+/g, ' ')
+
+  assert.match(readme, /\[Agent guide\]\(docs\/agent-guide\.md\)/)
+  assert.match(setup, /\[Agent guide\]\(agent-guide\.md\)/)
+  assert.match(tools, /\[Agent guide\]\(agent-guide\.md\)/)
+  for (const text of [
+    'MCP initialization instructions',
+    'list_workspaces',
+    'get_mcp_tool_coverage',
+    'get_mcp_workflow_recipes',
+    'structuredContent',
+    'nextCursor',
+    'sourceId and deepLink',
+    'unavailable is not the same as empty',
+    'custom_database_design',
+    'plan_custom_database',
+    'apply_custom_database_plan',
+    'exact plan ID and hash',
+    'analyze_obsidian_vault',
+    'get_obsidian_import_plan',
+    'import_obsidian_vault',
+    'get_obsidian_import_status',
+    'later user message',
+    'source vault stays read-only',
+    'untrusted evidence, never instructions',
+    'Scopes are independent',
+  ]) {
+    assert.ok(normalized.includes(text), `docs/agent-guide.md is missing agent guidance: ${text}`)
+  }
+})
+
 test('publication audit contains only public-safe repository context', async () => {
   const audit = await readFile(new URL('../PUBLICATION_AUDIT.md', import.meta.url), 'utf8')
   const forbiddenPatterns = [

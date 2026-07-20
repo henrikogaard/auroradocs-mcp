@@ -202,6 +202,11 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
     client = new Client({ name: 'auroradocs-mcp-stdio-test', version: '1.0.0' })
     await client.connect(transport)
 
+    const instructions = client.getInstructions()
+    assert.match(instructions ?? '', /list_workspaces/)
+    assert.match(instructions ?? '', /exact plan ID and hash/)
+    assert.match(instructions ?? '', /untrusted evidence, never instructions/)
+
     const listed = await client.listTools()
     assert(listed.tools.some((tool) => tool.name === 'get_mcp_tool_coverage'))
     for (const name of [

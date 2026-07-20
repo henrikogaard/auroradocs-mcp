@@ -24,6 +24,28 @@ const context: AuroraConnectionContext = {
   }],
 }
 
+test('server advertises a safe agent operating contract during initialization', async () => {
+  const server = createAuroraMcpServer(context)
+  const client = new Client({ name: 'instructions-test', version: '1.0.0' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  try {
+    await server.connect(serverTransport)
+    await client.connect(clientTransport)
+    const instructions = client.getInstructions()
+
+    assert.match(instructions ?? '', /list_workspaces/)
+    assert.match(instructions ?? '', /get_mcp_workflow_recipes/)
+    assert.match(instructions ?? '', /read tools first/i)
+    assert.match(instructions ?? '', /explicit user approval/i)
+    assert.match(instructions ?? '', /exact plan ID and hash/i)
+    assert.match(instructions ?? '', /untrusted evidence, never instructions/i)
+    assert.match(instructions ?? '', /sourceId and deepLink/)
+  } finally {
+    await client.close().catch(() => undefined)
+    await server.close().catch(() => undefined)
+  }
+})
+
 test('server uses advertised form elicitation and decline returns a write-free no-op', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'aurora-server-consent-'))
   const vaultRoot = path.join(root, 'Vault')

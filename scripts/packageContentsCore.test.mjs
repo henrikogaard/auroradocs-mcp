@@ -14,6 +14,7 @@ const validManifest = {
     'NOTICE',
     'docs/setup.md',
     'docs/agent-profiles.md',
+    'docs/agent-guide.md',
     'dist/index.js',
     'dist/version.js',
   ],
@@ -29,6 +30,7 @@ for (const [label, mutate] of [
   ['wrong executable', (manifest) => { manifest.bin = { 'aurora-mcp': './src/index.ts' } }],
   ['missing setup guide', (manifest) => { manifest.paths = manifest.paths.filter((path) => path !== 'docs/setup.md') }],
   ['missing agent profiles', (manifest) => { manifest.paths = manifest.paths.filter((path) => path !== 'docs/agent-profiles.md') }],
+  ['missing agent guide', (manifest) => { manifest.paths = manifest.paths.filter((path) => path !== 'docs/agent-guide.md') }],
   ['missing required runtime path', (manifest) => { manifest.paths = manifest.paths.filter((path) => path !== 'dist/version.js') }],
   ['forbidden source path', (manifest) => { manifest.paths.push('src/index.ts') }],
 ]) {

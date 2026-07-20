@@ -8,6 +8,10 @@ with `list_workspaces`; every workspace data call then selects one grant with
 `workspace_id` or an unambiguous `workspace_alias`. A legacy `aur_mcp_` token
 is pinned to its configured `AURORA_WORKSPACE_ID`.
 
+Agents should start with the [Agent guide](agent-guide.md) for capability
+selection, read/write boundaries, structured-result handling, citations, and
+the approval-gated custom-database and Obsidian workflows.
+
 ## Scope catalog
 
 | Scope | Permission |

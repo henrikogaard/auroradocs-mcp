@@ -14,6 +14,7 @@ import {
   getAuroraPromptDefinitions,
   getAuroraPrompt,
   getAuroraResourceTemplates,
+  getAuroraServerInstructions,
   readAuroraResource,
 } from './mcpSurfaces.js'
 import { executeToolCall, toMcpToolCallResult } from './tools.js'
@@ -25,7 +26,10 @@ import { buildObsidianConsentElicitation } from './obsidian/consent.js'
 export function createAuroraMcpServer(context: AuroraConnectionContext): Server {
   const server = new Server(
     { name: 'auroradocs-mcp', version: SERVER_VERSION },
-    { capabilities: { tools: {}, prompts: {}, resources: {} } },
+    {
+      capabilities: { tools: {}, prompts: {}, resources: {} },
+      instructions: getAuroraServerInstructions(),
+    },
   )
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
