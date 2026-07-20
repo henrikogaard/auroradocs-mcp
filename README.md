@@ -5,8 +5,8 @@ granted AuroraCloud workspaces. It runs on your computer over stdio and sends
 authenticated requests to `https://api.auroradocs.eu`.
 
 The public package is `@henrikogard/auroradocs-mcp` and the executable is
-`aurora-mcp`. The latest published package is `0.2.0`; the current source
-version is `0.2.1` and requires its package release or a local source build.
+`aurora-mcp`. The latest published package and current source version are
+`0.2.1`.
 
 For an end-to-end installation walkthrough, use the dedicated
 [Setup guide](docs/setup.md). AI assistants and client integrators should start
@@ -88,7 +88,7 @@ in the knowledge-search recipe above.
 ## Configure a client
 
 All examples below use the production AuroraCloud API, a new client credential,
-and package version `0.2.0`. Replace `REDACTED` locally. Do not commit the
+and package version `0.2.1`. Replace `REDACTED` locally. Do not commit the
 resulting configuration. The examples store the token in the client's saved
 configuration, so protect that file as a credential.
 
@@ -98,8 +98,8 @@ New client credentials require these environment variables:
 | --- | --- |
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
-| `AURORA_OBSIDIAN_VAULT_ROOT` | optional absolute path authorizing read-only analysis of one Obsidian vault (`0.2.1` source; not yet published) |
-| `AURORA_MCP_STATE_DIR` | optional private plan/journal directory outside that vault (`0.2.1` source; not yet published) |
+| `AURORA_OBSIDIAN_VAULT_ROOT` | optional absolute path authorizing read-only analysis of one Obsidian vault |
+| `AURORA_MCP_STATE_DIR` | optional private plan/journal directory outside that vault |
 
 Do not set `AURORA_WORKSPACE_ID` for a client credential. The server discovers
 only its owner-approved grants with `list_workspaces`; each data call then
@@ -119,7 +119,7 @@ this server under `mcpServers`, preserving any servers already present:
   "mcpServers": {
     "auroradocs": {
       "command": "npx",
-      "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.0"],
+      "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.1"],
       "env": {
         "AURORA_API_URL": "https://api.auroradocs.eu",
         "AURORA_API_TOKEN": "REDACTED"
@@ -142,7 +142,7 @@ Options must appear before the server name:
 claude mcp add --transport stdio --scope user \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.0
+  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.1
 ```
 
 Run `claude mcp get auroradocs` to inspect the saved entry, then use `/mcp` in
@@ -157,7 +157,7 @@ The installed Codex CLI accepts `--env` for local stdio servers:
 codex mcp add \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.0
+  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.1
 ```
 
 Run `codex mcp get auroradocs` to inspect the saved entry.
@@ -169,7 +169,7 @@ Use this valid generic JSON shape when a client accepts an MCP server object:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.0"],
+  "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.1"],
   "env": {
     "AURORA_API_URL": "https://api.auroradocs.eu",
     "AURORA_API_TOKEN": "REDACTED"
@@ -181,7 +181,7 @@ The client must launch the process locally and communicate over stdio. Do not
 configure `https://api.auroradocs.eu` as an MCP HTTP/SSE URL; it is the API the
 local server calls, not a hosted MCP endpoint.
 
-## Agent discovery and recovery — 0.2.1 source
+## Agent discovery and recovery
 
 The server sends initialization instructions, exposes machine-readable workflow
 recipes with approval/write/stop/result contracts, and advertises MCP
@@ -194,9 +194,9 @@ MCP completions apply to prompt and resource-template arguments; direct tool
 inputs continue to use the bounded discovery tools documented in the
 [Agent guide](docs/agent-guide.md).
 
-## Custom databases and templates — 0.2.1 source
+## Custom databases and templates
 
-The current source can discover existing object types/templates, offer starter
+AuroraDocs MCP can discover existing object types/templates, offer starter
 recipes for contacts, interests, equipment, subscriptions, and expenses, and
 plan an arbitrary special-purpose schema. Use `plan_custom_database` first,
 review the exact plan ID/hash, then call `apply_custom_database_plan` only after
@@ -208,7 +208,7 @@ plan-before-apply flow. Templates can include a starter body and schema-declared
 defaults, but should never contain real credentials, payment data, or sensitive
 personal records.
 
-## Obsidian vault import — 0.2.1 source
+## Obsidian vault import
 
 Set `AURORA_OBSIDIAN_VAULT_ROOT` to one absolute local vault path only when you
 want to authorize read-only analysis. Import is a separate action: the server

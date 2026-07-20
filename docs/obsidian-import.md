@@ -1,7 +1,7 @@
 # Obsidian import
 
-> **0.2.1 source:** this guide describes the current source branch. The latest
-> published npm package remains 0.2.0 and does not include these tools yet.
+> **Available in 0.2.1:** these tools require the published 0.2.1 package or
+> newer.
 
 The importer converts one explicitly authorized local Obsidian vault into an
 AuroraCloud-backed AuroraDocs workspace. It is analyze-first, consent-gated,

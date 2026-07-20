@@ -1,7 +1,7 @@
 # Setup
 
 This guide connects a local MCP client to owner-approved AuroraCloud workspace
-grants with `@henrikogard/auroradocs-mcp@0.2.0`. The server runs locally over
+grants with `@henrikogard/auroradocs-mcp@0.2.1`. The server runs locally over
 stdio; it is not a hosted MCP endpoint.
 
 ## Requirements
@@ -62,9 +62,8 @@ Every new client entry provides these values:
 | `AURORA_API_URL` | `https://api.auroradocs.eu` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
 
-For the `0.2.1` source Obsidian importer, add these only after backing up the
-source vault and choosing a test destination. It is not in the published
-`0.2.0` package:
+For the `0.2.1` Obsidian importer, add these only after backing up the source
+vault and choosing a test destination:
 
 | Variable | Value |
 | --- | --- |
@@ -81,7 +80,7 @@ Generic stdio configuration:
 ```json
 {
   "command": "npx",
-  "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.0"],
+  "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.1"],
   "env": {
     "AURORA_API_URL": "https://api.auroradocs.eu",
     "AURORA_API_TOKEN": "REDACTED"
@@ -157,7 +156,7 @@ servers, then restart Claude Desktop:
   "mcpServers": {
     "auroradocs": {
       "command": "npx",
-      "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.0"],
+      "args": ["-y", "@henrikogard/auroradocs-mcp@0.2.1"],
       "env": {
         "AURORA_API_URL": "https://api.auroradocs.eu",
         "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
@@ -175,7 +174,7 @@ claude mcp add --transport stdio --scope user \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.0
+  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.1
 ```
 
 Run `claude mcp get auroradocs` to inspect the saved entry.
@@ -187,7 +186,7 @@ codex mcp add \
   --env AURORA_API_URL=https://api.auroradocs.eu \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
-  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.0
+  auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.2.1
 ```
 
 Run `codex mcp get auroradocs` to inspect the saved entry.

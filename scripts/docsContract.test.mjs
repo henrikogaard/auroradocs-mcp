@@ -21,7 +21,7 @@ const requiredReadmeText = [
   'Revoke all active tokens',
   'E2EE',
   'stdio',
-  '@henrikogard/auroradocs-mcp@0.2.0',
+  '@henrikogard/auroradocs-mcp@0.2.1',
   'read:tasks',
   'write:tasks',
 ]
@@ -66,7 +66,7 @@ test('dedicated setup guide covers keys, clients, verification, and revocation',
     'Settings → Workspace → MCP Access',
     'shown only once',
     'read:objects',
-    '@henrikogard/auroradocs-mcp@0.2.0',
+    '@henrikogard/auroradocs-mcp@0.2.1',
     'Claude Desktop',
     'developer settings',
     'Claude Code',
@@ -194,7 +194,7 @@ test('public docs use only the canonical scoped npm package', async () => {
   ])
   const docs = documents.join('\n')
 
-  assert.match(docs, /npx -y @henrikogard\/auroradocs-mcp@0\.2\.0/)
+  assert.match(docs, /npx -y @henrikogard\/auroradocs-mcp@0\.2\.1/)
   assert.doesNotMatch(docs, /@henrikogaard\/auroradocs-mcp/)
   assert.doesNotMatch(docs, /npx -y auroradocs-mcp(?:@|\s|`)/)
 })
@@ -307,8 +307,10 @@ test('public docs explain custom databases and the consent-gated local Obsidian 
     'create_template', 'create_from_template',
   ]) assert.ok(tools.includes(`\`${tool}\``), `Tool reference is missing ${tool}`)
 
-  assert.match(readme, /latest published package is `0\.2\.0`/)
-  assert.match(obsidian, /published npm package remains 0\.2\.0 and does not include these tools yet/)
+  assert.match(readme, /latest published package and current source version are\s+`0\.2\.1`/)
+  assert.match(obsidian, /Available in 0\.2\.1/)
+  assert.doesNotMatch(readme, /not yet published/)
+  assert.doesNotMatch(obsidian, /does not include these tools yet/)
 })
 
 test('packaged agent guide maps capabilities to safe, concrete workflows', async () => {
