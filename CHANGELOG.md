@@ -72,6 +72,8 @@ All notable changes to this project are documented in this file.
 
 ### Security
 
+- Resolved audited transitive `fast-uri` host-confusion and Hono static-server
+  path-traversal advisories in the production dependency graph.
 - Obsidian access requires one explicit absolute root, stays read-only, rejects
   symlinks/traversal/root replacement, performs no external fetches, and fails
   closed before AuroraCloud writes on stale plans, missing scopes, viewer role,
