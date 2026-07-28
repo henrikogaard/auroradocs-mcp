@@ -185,7 +185,11 @@ export function buildMcpObjectPropertyResult(input: {
 
   const properties: Record<string, string> = {}
   for (const property of input.rawProperties) {
-    if (property.value_type === 'formula' || property.value_type === 'rollup') {
+    if (
+      computedLabels.has(property.key)
+      || property.value_type === 'formula'
+      || property.value_type === 'rollup'
+    ) {
       if (!computedLabels.has(property.key)) computedLabels.set(property.key, property.key)
       continue
     }

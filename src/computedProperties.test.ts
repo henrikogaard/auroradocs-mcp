@@ -60,6 +60,32 @@ test('MCP object properties report incomplete schema discovery explicitly', () =
   assert.deepEqual(result.computed_properties, {})
 })
 
+test('known computed schema keys suppress legacy shadows mislabeled as scalar rows', () => {
+  const result = buildMcpObjectPropertyResult({
+    rawProperties: [
+      {
+        id: 'property-shadow',
+        object_id: 'row-1',
+        key: 'score',
+        value_type: 'text',
+        value_text: '999',
+        value_num: null,
+        value_date: null,
+        value_bool: null,
+        value_ref: null,
+      },
+    ],
+    schema: [{ key: 'score', label: 'Score', value_type: 'formula' }],
+    computedPropertiesStatus: 'complete',
+  })
+
+  assert.deepEqual(result.properties, {})
+  assert.deepEqual(result.computed_properties, {
+    score: { label: 'Score', status: 'unavailable', code: 'local_evaluation_required' },
+  })
+  assert.doesNotMatch(JSON.stringify(result), /999/)
+})
+
 test('get_object discovers custom computed fields without returning a stored shadow', async () => {
   const previousApiUrl = process.env['AURORA_API_URL']
   const server = createServer((request, response) => {
