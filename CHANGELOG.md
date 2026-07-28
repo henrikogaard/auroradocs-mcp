@@ -39,6 +39,10 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Kept client-grant object, content, and property operations workspace-scoped,
+  treated the API's missing-record workspace response as a safe absent object,
+  and made resumable Obsidian content upserts work with the documented
+  least-privilege import scopes.
 - Hardened Obsidian import prerequisites and recovery: failed custom types or
   parent containers no longer downgrade or flatten entries, failed entries no
   longer strand later batches, attachment failures remain retryable and prevent
