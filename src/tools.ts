@@ -38,7 +38,13 @@ import {
   createAuroraTemplate,
   createAuroraObjectFromTemplate,
 } from './auroraClient.js'
-import type { AuroraWorkspaceMember, AuroraTaskList, AuroraTaskProps, WorkspaceKnowledgeSource } from './auroraClient.js'
+import type {
+  AuroraPropertyRecord,
+  AuroraWorkspaceMember,
+  AuroraTaskList,
+  AuroraTaskProps,
+  WorkspaceKnowledgeSource,
+} from './auroraClient.js'
 import { buildWeekPlan, normalizeCanvasContent } from './planningTools.js'
 import type { McpCanvasReadResult, McpWeekPlan } from './planningTools.js'
 import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js'
@@ -100,7 +106,15 @@ import type {
 export type ToolResult =
   | { type: 'workspaces'; workspaces: GrantedWorkspace[] }
   | { type: 'objects'; objects: { id: string; title: string | null; type: string; icon: string | null }[] }
-  | { type: 'object'; object: { id: string; title: string | null; type: string; icon: string | null }; availability: Availability; content: string | null; properties: Record<string, string> }
+  | {
+      type: 'object'
+      object: { id: string; title: string | null; type: string; icon: string | null }
+      availability: Availability
+      content: string | null
+      properties: Record<string, string>
+      computed_properties: Record<string, McpComputedPropertyUnavailable>
+      computed_properties_status: 'complete' | 'unavailable'
+    }
   | { type: 'created'; id: string; title: string }
   | { type: 'task_created'; id: string; title: string; status: string | null; task_list_name: string | null }
   | { type: 'task_updated'; id: string; title: string; changed_fields: string[] }
@@ -137,6 +151,65 @@ export type ToolResult =
   | ({ type: 'project_changes' } & ProjectChangesResult)
   | { type: 'no_op'; message: string }
   | ToolErrorResult
+
+export type McpComputedPropertyUnavailable = {
+  label: string
+  status: 'unavailable'
+  code: 'local_evaluation_required'
+}
+
+export function buildMcpObjectPropertyResult(input: {
+  rawProperties: readonly AuroraPropertyRecord[]
+  schema: readonly unknown[]
+  computedPropertiesStatus: 'complete' | 'unavailable'
+}): {
+  properties: Record<string, string>
+  computed_properties: Record<string, McpComputedPropertyUnavailable>
+  computed_properties_status: 'complete' | 'unavailable'
+} {
+  const computedLabels = new Map<string, string>()
+  for (const field of input.schema) {
+    if (!field || typeof field !== 'object' || Array.isArray(field)) continue
+    const record = field as Record<string, unknown>
+    const key = typeof record['key'] === 'string' ? record['key'] : ''
+    const valueType = typeof record['value_type'] === 'string' ? record['value_type'] : ''
+    if (
+      !key ||
+      (valueType !== 'formula' && valueType !== 'rollup' && !Object.hasOwn(record, 'computed'))
+    ) continue
+    computedLabels.set(
+      key,
+      typeof record['label'] === 'string' && record['label'] ? record['label'] : key,
+    )
+  }
+
+  const properties: Record<string, string> = {}
+  for (const property of input.rawProperties) {
+    if (property.value_type === 'formula' || property.value_type === 'rollup') {
+      if (!computedLabels.has(property.key)) computedLabels.set(property.key, property.key)
+      continue
+    }
+    properties[property.key] =
+      property.value_text
+      ?? property.value_date
+      ?? (property.value_num != null ? String(property.value_num) : null)
+      ?? (property.value_bool != null ? String(property.value_bool) : null)
+      ?? property.value_ref
+      ?? ''
+  }
+
+  return {
+    properties,
+    computed_properties: Object.fromEntries(
+      [...computedLabels].map(([key, label]) => [key, {
+        label,
+        status: 'unavailable' as const,
+        code: 'local_evaluation_required' as const,
+      }]),
+    ),
+    computed_properties_status: input.computedPropertiesStatus,
+  }
+}
 
 export type McpToolCallResult = {
   content: [{ type: 'text'; text: string }]
@@ -584,25 +657,36 @@ async function executeToolCallUnsafe(
 
         const content = await getContent(id, workspaceId)
 
-        // Include properties
         const rawProps = await listProperties([id], workspaceId)
-        const properties: Record<string, string> = {}
-        for (const p of rawProps) {
-          properties[p.key] =
-            p.value_text
-            ?? p.value_date
-            ?? (p.value_num != null ? String(p.value_num) : null)
-            ?? (p.value_bool != null ? String(p.value_bool) : null)
-            ?? p.value_ref
-            ?? ''
+        let schema: readonly unknown[] = []
+        let computedPropertiesStatus: 'complete' | 'unavailable' = 'complete'
+        if (obj.type.startsWith('custom:')) {
+          try {
+            const typeId = obj.type.slice('custom:'.length)
+            const objectType = (await listAuroraObjectTypes(workspaceId))
+              .find((candidate) => candidate.id === typeId)
+            if (objectType) schema = objectType.schema
+            else computedPropertiesStatus = 'unavailable'
+          } catch {
+            computedPropertiesStatus = 'unavailable'
+          }
+        } else if (obj.type.startsWith('database-row:')) {
+          // Freeform schemas may exist only in a trusted client or encrypted
+          // database config; this remote server must not infer/evaluate them.
+          computedPropertiesStatus = 'unavailable'
         }
+        const propertyResult = buildMcpObjectPropertyResult({
+          rawProperties: rawProps,
+          schema,
+          computedPropertiesStatus,
+        })
 
         return {
           type: 'object',
           object: { id: obj.id, title: obj.title, type: obj.type, icon: obj.icon },
           availability: content.availability,
           content: content.text,
-          properties,
+          ...propertyResult,
         }
       }
 
@@ -1242,9 +1326,18 @@ export function formatToolResult(result: ToolResult): string {
       const propLines = Object.entries(result.properties)
         .map(([k, v]) => `  ${k}: ${v}`)
         .join('\n')
+      const computedLines = Object.entries(result.computed_properties)
+        .map(([key, value]) =>
+          `  ${value.label} [${key}]: unavailable (trusted local evaluation required)`,
+        )
+        .join('\n')
       return [
         `**${result.object.title ?? 'Untitled'}** (${result.object.type}, ${result.object.id})`,
         propLines ? `\nProperties:\n${propLines}` : '',
+        computedLines ? `\nComputed properties:\n${computedLines}` : '',
+        result.computed_properties_status === 'unavailable'
+          ? '\nComputed property schema/results are unavailable to this remote MCP server.'
+          : '',
         result.content
           ? `\n\n${result.content}`
           : result.availability === 'encrypted_locked'

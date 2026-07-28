@@ -68,7 +68,7 @@ including object lookup and startup membership verification.
 | `wiki_get_page` | Read one source; the client can omit full text from its result. | `read:objects`, `read:content` |
 | `wiki_related` | Find sources related to an object. | `read:objects`, `search` |
 | `wiki_recent` | List recently updated readable sources. | `read:objects` |
-| `get_object` | Return one object's metadata, properties, and readable content. | `read:objects`, `read:content` |
+| `get_object` | Return one object's metadata, stored properties, readable content, and explicit unavailable states for computed fields that require trusted local evaluation. | `read:objects`, `read:content` |
 | `list_workspace_members` | List members and roles in the token workspace. | `read:objects` |
 | `list_task_lists` | List task lists. | `read:objects`, `read:tasks` |
 | `list_task_statuses` | Return supported task status names. | `read:objects`, `read:tasks` |

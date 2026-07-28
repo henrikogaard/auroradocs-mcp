@@ -4,6 +4,13 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- `get_object` no longer returns legacy stored formula/rollup display strings.
+  Known custom-type computed fields are reported as unavailable because the
+  remote MCP server cannot run AuroraDocs' trusted local evaluator; freeform
+  database rows also expose an explicit incomplete computed-schema status.
+
 ## [0.2.1] - 2026-07-20
 
 ### Added
