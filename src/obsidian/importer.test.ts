@@ -52,7 +52,7 @@ function fakeDependencies(capability = capabilities()) {
       objects.set(input.id, value); return value
     },
     setContent: async (_workspaceId, objectId, value) => { writeCalls += 1; content.set(objectId, value) },
-    upsertProperty: async (_workspaceId, objectId, key, valueType, value) => { writeCalls += 1; properties.push({ objectId, key, valueType, value }) },
+    upsertProperty: async (objectId, _workspaceId, key, valueType, value) => { writeCalls += 1; properties.push({ objectId, key, valueType, value }) },
     uploadAttachment: async (input) => {
       writeCalls += 1
       const existing = attachments.get(input.idempotencyKey)

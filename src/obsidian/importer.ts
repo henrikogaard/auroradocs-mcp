@@ -26,7 +26,7 @@ export type ObsidianImportDependencies = {
   createObjectType(workspaceId: string, input: { id: string; name: string; icon: string | null; color: string | null; schema: ObjectTypeSchema[] }): Promise<ObjectTypeDef>
   createObject(workspaceId: string, input: { id: string; type: string; title: string; icon?: string | null; parentId?: string | null; isTemplate?: boolean }): Promise<AuroraObjectRecord>
   setContent(workspaceId: string, objectId: string, content: Record<string, unknown>): Promise<void>
-  upsertProperty(workspaceId: string, objectId: string, key: string, valueType: PropertyValueType, value: string | number | boolean | null): Promise<void>
+  upsertProperty(objectId: string, workspaceId: string, key: string, valueType: PropertyValueType, value: string | number | boolean | null): Promise<void>
   uploadAttachment(input: { workspaceId: string; objectId: string; fileName: string; mimeType: string; bytes: Buffer; idempotencyKey: string }): Promise<AuroraAttachmentUpload>
   now(): Date
 }
@@ -414,10 +414,10 @@ export async function runObsidianImportBatch(
         const fields = group?.schema ?? []
         for (const field of fields) {
           const value = propertyValue(note, field, stored)
-          if (value !== undefined) await dependencies.upsertProperty(stored.plan.workspaceId, entry.objectId, field.key, field.value_type, value)
+          if (value !== undefined) await dependencies.upsertProperty(entry.objectId, stored.plan.workspaceId, field.key, field.value_type, value)
         }
         if (!fields.some((field) => field.key === 'tags') && note.tags.length) {
-          await dependencies.upsertProperty(stored.plan.workspaceId, entry.objectId, 'tags', 'multi_select', JSON.stringify(note.tags))
+          await dependencies.upsertProperty(entry.objectId, stored.plan.workspaceId, 'tags', 'multi_select', JSON.stringify(note.tags))
         }
       }
       state.phase = 'content'; state.status = 'complete'; delete state.errorCode

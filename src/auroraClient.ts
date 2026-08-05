@@ -330,7 +330,10 @@ export async function getObject(id: string, workspaceId: string): Promise<Aurora
     if (obj.workspace_id !== workspaceId) return null
     return obj
   } catch (error) {
-    if (error instanceof AuroraApiError && error.status === 404) return null
+    if (
+      error instanceof AuroraApiError
+      && (error.status === 404 || (error.status === 400 && error.code === 'mcp_workspace_required'))
+    ) return null
     throw error
   }
 }
@@ -486,7 +489,7 @@ export async function upsertAuroraPropertyStable(
   }
   const client = getAuroraClient()
   const existing = await client.collection('object_properties').listPage({
-    filter: client.filter('object_id = {:oid} && key = {:key}', { oid: objectId, key }),
+    filter: client.filter('object_id = {:oid} && key = {:key} && workspace_id = {:wid}', { oid: objectId, key, wid: workspaceId }),
     page: 1,
     perPage: 1,
   })
@@ -598,7 +601,9 @@ export async function setAuroraContentStable(
   objectId: string,
   content: Record<string, unknown>,
 ): Promise<void> {
-  await setContent(objectId, workspaceId, content)
+  const object = await getObject(objectId, workspaceId)
+  if (!object) throw new ToolNotFoundError(`Object ${objectId} not found in this workspace`)
+  await getAuroraClient().collection('content').create({ object_id: objectId, content_json: content })
 }
 
 export type AuroraImportCapabilities = {
@@ -708,7 +713,7 @@ export async function getContent(objectId: string, workspaceId: string): Promise
 
     const client = getAuroraClient()
     const records = await client.collection('content').listPage({
-      filter: client.filter('object_id = {:id}', { id: objectId }),
+      filter: client.filter('object_id = {:id} && workspace_id = {:wid}', { id: objectId, wid: workspaceId }),
       page: 1,
       perPage: 1,
     })
@@ -740,7 +745,7 @@ export async function getContentJson(objectId: string, workspaceId: string): Pro
 
   const client = getAuroraClient()
   const records = await client.collection('content').listPage({
-    filter: client.filter('object_id = {:id}', { id: objectId }),
+    filter: client.filter('object_id = {:id} && workspace_id = {:wid}', { id: objectId, wid: workspaceId }),
     page: 1,
     perPage: 1,
   })
@@ -831,7 +836,7 @@ export async function setContent(
 
   const client = getAuroraClient()
   const existing = await client.collection('content').listPage({
-    filter: client.filter('object_id = {:id}', { id: objectId }),
+    filter: client.filter('object_id = {:id} && workspace_id = {:wid}', { id: objectId, wid: workspaceId }),
     page: 1,
     perPage: 1,
   })
@@ -858,7 +863,7 @@ export async function getObjectE2eeStatus(objectId: string, workspaceId: string)
   const client = getAuroraClient()
   try {
     const records = await client.collection('content').listPage({
-      filter: client.filter('object_id = {:id}', { id: objectId }),
+      filter: client.filter('object_id = {:id} && workspace_id = {:wid}', { id: objectId, wid: workspaceId }),
       page: 1,
       perPage: 1,
     })
@@ -903,9 +908,9 @@ export async function listProperties(
     const batch = objectIds.slice(i, i + 50)
     // Build parameterized OR filter for AuroraCloud collection queries.
     const conditions = batch.map((_, idx) => `object_id = {:id${idx}}`)
-    const params: Record<string, string> = {}
+    const params: Record<string, string> = { wid: workspaceId }
     batch.forEach((id, idx) => { params[`id${idx}`] = id })
-    const filter = client.filter(conditions.join(' || '), params)
+    const filter = client.filter(`${conditions.join(' || ')} && workspace_id = {:wid}`, params)
 
     for (let page = 1; page <= maxPages; page += 1) {
       const records = await client.collection('object_properties').listPage({ filter, page, perPage: 50 })
@@ -944,7 +949,7 @@ export async function upsertProperty(
 
   const client = getAuroraClient()
   const existing = await client.collection('object_properties').listPage({
-    filter: client.filter('object_id = {:oid} && key = {:key}', { oid: objectId, key }),
+    filter: client.filter('object_id = {:oid} && key = {:key} && workspace_id = {:wid}', { oid: objectId, key, wid: workspaceId }),
     page: 1,
     perPage: 1,
   })

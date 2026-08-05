@@ -5,10 +5,13 @@ import type { AddressInfo } from 'node:net'
 import {
   createAuroraObjectFromTemplate,
   createAuroraObjectStable,
+  getContentJson,
   listAuroraObjectTypes,
   listAuroraTemplates,
+  listProperties,
   resetAuroraClientForTests,
   restoreObject,
+  setAuroraContentStable,
   upsertAuroraPropertyStable,
 } from './auroraClient.js'
 
@@ -80,6 +83,104 @@ test('stable object retries normalize stored empty optional fields to null', asy
     assert.equal(object.icon, null)
     assert.equal(object.parent_id, null)
     assert.equal(creates, 0)
+  })
+})
+
+test('stable object creation treats the MCP missing-record workspace response as not found', async () => {
+  let creates = 0
+  let objectReads = 0
+  await withServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    res.setHeader('content-type', 'application/json')
+    if (req.method === 'GET' && url.pathname === '/api/collections/objects/records/object-new') {
+      objectReads += 1
+      res.statusCode = 400
+      res.end(JSON.stringify({ error: 'MCP client requests require an explicit workspace.', code: 'mcp_workspace_required' }))
+      return
+    }
+    if (req.method === 'POST' && url.pathname === '/api/collections/objects/records') {
+      creates += 1
+      const body = await bodyOf(req)
+      res.statusCode = 201
+      res.end(JSON.stringify({
+        ...body, icon: null, parent_id: null,
+        created_at: 'now', updated_at: 'now',
+      }))
+      return
+    }
+    res.statusCode = 404; res.end(JSON.stringify({ code: 'not_found' }))
+  }, async () => {
+    const object = await createAuroraObjectStable('workspace-1', {
+      id: 'object-new', type: 'space', title: 'Archive', parentId: null,
+    })
+    assert.equal(object.id, 'object-new')
+    assert.equal(objectReads, 1)
+    assert.equal(creates, 1)
+  })
+})
+
+test('content and property list reads carry the explicit workspace for client grants', async () => {
+  const filters: Record<string, string> = {}
+  await withServer((req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    res.setHeader('content-type', 'application/json')
+    if (req.method === 'GET' && url.pathname === '/api/collections/objects/records/object-scoped') {
+      res.end(JSON.stringify({
+        id: 'object-scoped', workspace_id: 'workspace-1', type: 'page', title: 'Scoped',
+        icon: null, parent_id: null, is_deleted: false, is_template: false, created_at: 'now', updated_at: 'now',
+      }))
+      return
+    }
+    if (req.method === 'GET' && url.pathname === '/api/collections/content/records') {
+      filters.content = url.searchParams.get('filter') ?? ''
+      res.end(JSON.stringify({ page: 1, perPage: 1, totalItems: 0, totalPages: 1, items: [] }))
+      return
+    }
+    if (req.method === 'GET' && url.pathname === '/api/collections/object_properties/records') {
+      filters.properties = url.searchParams.get('filter') ?? ''
+      res.end(JSON.stringify({ page: 1, perPage: 50, totalItems: 0, totalPages: 1, items: [] }))
+      return
+    }
+    res.statusCode = 404; res.end(JSON.stringify({ code: 'not_found' }))
+  }, async () => {
+    assert.equal(await getContentJson('object-scoped', 'workspace-1'), null)
+    assert.deepEqual(await listProperties(['object-scoped'], 'workspace-1'), [])
+    assert.match(filters.content ?? '', /workspace_id = "workspace-1"/)
+    assert.match(filters.properties ?? '', /workspace_id = "workspace-1"/)
+  })
+})
+
+test('stable importer content writes use the write-only upsert path', async () => {
+  let contentReads = 0
+  let contentWrites = 0
+  await withServer(async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    res.setHeader('content-type', 'application/json')
+    if (req.method === 'GET' && url.pathname === '/api/collections/objects/records/object-import') {
+      res.end(JSON.stringify({
+        id: 'object-import', workspace_id: 'workspace-1', type: 'page', title: 'Import',
+        icon: null, parent_id: null, is_deleted: false, is_template: false, created_at: 'now', updated_at: 'now',
+      }))
+      return
+    }
+    if (req.method === 'GET' && url.pathname === '/api/collections/content/records') {
+      contentReads += 1
+      res.statusCode = 403
+      res.end(JSON.stringify({ code: 'mcp_grant_denied' }))
+      return
+    }
+    if (req.method === 'POST' && url.pathname === '/api/collections/content/records') {
+      contentWrites += 1
+      const body = await bodyOf(req)
+      res.statusCode = 201
+      res.end(JSON.stringify({ id: 'content-import', ...body }))
+      return
+    }
+    res.statusCode = 404; res.end(JSON.stringify({ code: 'not_found' }))
+  }, async () => {
+    await setAuroraContentStable('workspace-1', 'object-import', { type: 'doc', content: [] })
+    assert.equal(contentReads, 0)
+    assert.equal(contentWrites, 1)
   })
 })
 
