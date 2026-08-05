@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Updated the MCP SDK to 1.30.0 and refreshed its patched production
+  transitive dependencies so the Node 20/22 CI audit is clean.
+- `get_object` no longer returns legacy stored formula/rollup display strings,
+  including scalar-mislabeled shadows whose keys are known-computed from the
+  custom-type schema. Known computed fields are reported as unavailable because
+  the remote MCP server cannot run AuroraDocs' trusted local evaluator;
+  freeform database rows also expose an explicit incomplete computed-schema
+  status.
+
 ## [0.2.1] - 2026-07-20
 
 ### Added

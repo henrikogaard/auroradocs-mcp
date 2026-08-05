@@ -626,7 +626,28 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
     availability: { type: 'string', enum: ['available', 'empty', 'encrypted_locked', 'permission_denied', 'not_found', 'unavailable'] },
     content: nullableStringSchema,
     properties: { type: 'object', additionalProperties: stringSchema },
-  }, ['object', 'availability', 'content', 'properties'])],
+    computed_properties: {
+      type: 'object',
+      additionalProperties: {
+        type: 'object',
+        properties: {
+          label: stringSchema,
+          status: { const: 'unavailable' },
+          code: { const: 'local_evaluation_required' },
+        },
+        required: ['label', 'status', 'code'],
+        additionalProperties: false,
+      },
+    },
+    computed_properties_status: { type: 'string', enum: ['complete', 'unavailable'] },
+  }, [
+    'object',
+    'availability',
+    'content',
+    'properties',
+    'computed_properties',
+    'computed_properties_status',
+  ])],
   list_workspace_members: [resultSchema('members', {
     members: {
       type: 'array',
