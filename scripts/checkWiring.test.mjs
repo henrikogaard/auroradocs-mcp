@@ -18,7 +18,7 @@ test('scoped npm package is configured for synchronized npm and GitHub releases'
   const releaseWorkflow = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8')
 
   assert.equal(pkg.name, '@henrikogard/auroradocs-mcp')
-  assert.equal(pkg.version, '0.2.1')
+  assert.equal(pkg.version, '0.3.0')
   assert.equal(pkg.publishConfig?.access, 'public')
   assert.match(releaseWorkflow, /Verify tag matches package version/)
   assert.match(releaseWorkflow, /npm publish --provenance --access public/)

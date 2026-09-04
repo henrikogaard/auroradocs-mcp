@@ -1,7 +1,7 @@
 # Obsidian import
 
-> **Available in 0.2.1:** these tools require the published 0.2.1 package or
-> newer.
+> **Available since 0.2.1:** these tools require the published `0.3.0` package
+> or newer.
 
 The importer converts one explicitly authorized local Obsidian vault into an
 AuroraCloud-backed AuroraDocs workspace. It is analyze-first, consent-gated,

@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "auroradocs",
   "display_name": "AuroraDocs",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Connect Claude Desktop to independently granted AuroraCloud workspaces over local stdio.",
   "long_description": "AuroraDocs MCP runs on this computer and calls the AuroraCloud API. It does not host an MCP HTTP endpoint. Use an `aur_mcp_client_` credential with owner-approved workspace grants. Optional Obsidian import reads one vault you authorize and never modifies the source.",
   "author": {

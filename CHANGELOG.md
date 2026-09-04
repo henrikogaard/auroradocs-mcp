@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-05
+
 ### Added
 
 - Speak MCP revision 2026-07-28 on stdio while still serving 2025-era clients
