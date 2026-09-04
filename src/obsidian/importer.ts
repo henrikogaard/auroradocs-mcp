@@ -20,6 +20,11 @@ import { createImportJournal, readImportJournal, writeImportJournal, type Import
 import { normalizeSchemaKey } from '../customDatabases.js'
 import type { AuthorizedVault } from './vaultAccess.js'
 
+export type ObsidianImportProgress = {
+  completed: number
+  total: number
+}
+
 export type ObsidianImportDependencies = {
   getCapabilities(workspaceId: string): Promise<AuroraImportCapabilities>
   listObjectTypes(workspaceId: string): Promise<ObjectTypeDef[]>
@@ -193,7 +198,11 @@ export async function runObsidianImportBatch(
   stored: StoredObsidianImportPlan,
   vault: AuthorizedVault,
   stateDir: string,
-  options: { batchSize?: number; dependencies?: ObsidianImportDependencies } = {},
+  options: {
+    batchSize?: number
+    dependencies?: ObsidianImportDependencies
+    onProgress?: (progress: ObsidianImportProgress) => void | Promise<void>
+  } = {},
 ): Promise<ObsidianImportBatchResult> {
   const dependencies = options.dependencies ?? defaults()
   const batchSize = Math.max(1, Math.min(options.batchSize ?? 50, 100))
@@ -222,6 +231,12 @@ export async function runObsidianImportBatch(
   if (journal.status === 'complete') return resultFromJournal(stored, journal, [])
   journal.status = 'in_progress'; journal.updatedAt = dependencies.now().toISOString()
   await writeImportJournal(stateDir, journal)
+  const total = stored.plan.entries.length
+  const reportProgress = async () => {
+    const completed = Object.values(journal.entries).filter((entry) => entry.status === 'complete').length
+    await options.onProgress?.({ completed, total })
+  }
+  await reportProgress()
 
   const warnings: ObsidianImportWarning[] = []
   const selection = selectPendingEntries(stored.plan.entries, journal, batchSize)
@@ -432,5 +447,6 @@ export async function runObsidianImportBatch(
   journal.cursor = selection.nextCursor
   const result = resultFromJournal(stored, journal, warnings)
   journal.updatedAt = dependencies.now().toISOString(); await writeImportJournal(stateDir, journal)
+  await reportProgress()
   return result
 }

@@ -2,11 +2,11 @@ import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createServer, type Server } from 'node:http'
 import { test } from 'node:test'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { Client } from '@modelcontextprotocol/client'
 import {
   getDefaultEnvironment,
   StdioClientTransport,
-} from '@modelcontextprotocol/sdk/client/stdio.js'
+} from '@modelcontextprotocol/client/stdio'
 
 const workspaceId = 'workspace-test'
 const token = 'aur_mcp_test_example'
@@ -375,7 +375,11 @@ test('client credentials discover granted workspaces without a default workspace
     })
     const objects = await client.callTool({ name: 'list_objects', arguments: { workspace_alias: 'test-space-test', limit: 1 } })
     assert.deepEqual(objects.structuredContent, { type: 'objects', objects: [] })
-    assert.deepEqual(requests, ['/api/mcp/workspaces', '/api/collections/objects/records'])
+    assert.deepEqual(requests, [
+      '/api/mcp/workspaces',
+      '/api/mcp/workspaces',
+      '/api/collections/objects/records',
+    ])
   } finally {
     await client?.close().catch(() => undefined)
     await transport?.close().catch(() => undefined)

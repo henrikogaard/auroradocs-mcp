@@ -30,8 +30,9 @@ reuse one token across unrelated clients.
 
 The package runs locally over stdio. It does not listen on a network port and
 AuroraDocs does not currently offer a hosted HTTP, SSE, WebSocket, or OAuth MCP
-endpoint. `https://api.auroradocs.eu` is the AuroraCloud REST API used by the
-local process, not an MCP endpoint.
+endpoint. The local process speaks MCP 2026-07-28 and still serves 2025-era
+stdio clients. `https://api.auroradocs.eu` is the AuroraCloud REST API used by
+the local process, not an MCP endpoint.
 
 Do not expose the stdio process through a network proxy or paste its credential
 into an arbitrary hosted agent service.
@@ -79,7 +80,8 @@ not scanned and cannot be read as attachments. No parser fetches remote URLs and
 modified.
 
 Import requires a separate, exact plan ID/hash acceptance. Form-capable MCP
-clients receive an elicitation request; only protocol `accept` with
+clients receive a form elicitation (a 2026 multi-round-trip `input_required`
+result, or a 2025 `elicitation/create` request). Only protocol `accept` with
 `confirmed: true` and unchanged policy choices proceeds. Decline, cancel,
 malformed content, changed choices, or an unavailable elicitation client without
 a later exact confirmation performs zero writes. Plans are workspace-bound,
@@ -92,7 +94,8 @@ uploads use one parent-bound MCP route and stable idempotency keys; the MCP
 cannot list, replace, or delete arbitrary files through that boundary.
 
 The private state lives outside the vault in a 0700 directory with 0600 files
-and atomic replacement. The persisted approved plan stores bounded policies,
+and atomic replacement. Custom-database plans use that same directory so apply
+survives an MCP restart. The persisted approved plan stores bounded policies,
 inferred schemas, planned IDs, warnings, and relative source paths needed for
 restart revalidation, but no note bodies, frontmatter values, attachment bytes,
 tokens, credentials, or absolute paths. The separate resume journal stores

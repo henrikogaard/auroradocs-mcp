@@ -86,10 +86,15 @@ import {
 import type { ObsidianGroupAdjustment, ObsidianImportPlanPreview } from './obsidian/importPlan.js'
 import {
   decideObsidianImportConsent,
+  ObsidianElicitationRequired,
   type ObsidianConsentPreview,
   type ObsidianConsentRequest,
 } from './obsidian/consent.js'
-import { runObsidianImportBatch, type ObsidianImportBatchResult } from './obsidian/importer.js'
+import { runObsidianImportBatch, type ObsidianImportBatchResult, type ObsidianImportProgress } from './obsidian/importer.js'
+import {
+  readCustomDatabasePlan,
+  writeCustomDatabasePlan,
+} from './customDatabasePlans.js'
 import { readImportJournal, summarizeImportJournal, type ObsidianImportStatus } from './obsidian/journal.js'
 import type { StoredObsidianImportPlan } from './obsidian/importPlan.js'
 import type {
@@ -225,6 +230,8 @@ export type ToolExecutionOptions = {
   requestObsidianImportConsent?: ObsidianConsentRequest
   runObsidianImport?: (stored: StoredObsidianImportPlan, batchSize: number) => Promise<ObsidianImportBatchResult>
   now?: () => Date
+  refreshClientGrants?: () => Promise<GrantedWorkspace[]>
+  reportProgress?: (progress: ObsidianImportProgress) => void | Promise<void>
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -262,8 +269,6 @@ function notFound(message: string): ToolErrorResult {
   return { type: 'error', code: 'not_found', message, retryable: false }
 }
 
-const CUSTOM_DATABASE_PLANS = new Map<string, CustomDatabasePlan>()
-
 async function loadStoredObsidianImportPlan(
   workspaceId: string,
   planId: string,
@@ -298,19 +303,6 @@ function cloneRecipe(recipe: CustomDatabaseRecipe): CustomDatabaseRecipe {
       },
     } : {}),
   }
-}
-
-function storeCustomDatabasePlan(plan: CustomDatabasePlan): void {
-  const now = Date.now()
-  for (const [key, value] of CUSTOM_DATABASE_PLANS) {
-    if (Date.parse(value.expiresAt) <= now) CUSTOM_DATABASE_PLANS.delete(key)
-  }
-  while (CUSTOM_DATABASE_PLANS.size >= 100) {
-    const oldest = CUSTOM_DATABASE_PLANS.keys().next().value as string | undefined
-    if (!oldest) break
-    CUSTOM_DATABASE_PLANS.delete(oldest)
-  }
-  CUSTOM_DATABASE_PLANS.set(`${plan.workspaceId}:${plan.planId}`, plan)
 }
 
 function optionalPresentation(input: Record<string, unknown>, key: 'icon' | 'color'): string | null | undefined {
@@ -551,6 +543,15 @@ export function resolveWorkspace(
   return matches[0].workspaceId
 }
 
+async function refreshClientGrants(
+  context: AuroraConnectionContext,
+  options: ToolExecutionOptions,
+): Promise<void> {
+  if (context.kind !== 'client' || !options.refreshClientGrants) return
+  const workspaces = await options.refreshClientGrants()
+  context.workspaces.splice(0, context.workspaces.length, ...workspaces)
+}
+
 export async function executeToolCall(
   name: string,
   input: Record<string, unknown>,
@@ -559,12 +560,30 @@ export async function executeToolCall(
 ): Promise<ToolResult> {
   try {
     const context = normalizeConnectionContext(connection)
-    if (name === 'list_workspaces') return { type: 'workspaces', workspaces: context.workspaces }
+    if (name === 'list_workspaces') {
+      await refreshClientGrants(context, options)
+      return { type: 'workspaces', workspaces: context.workspaces }
+    }
     if (name === 'get_mcp_tool_coverage' || name === 'get_mcp_workflow_recipes' || name === 'get_custom_database_recipes') {
       return await executeToolCallUnsafe(name, input, context.kind === 'legacy_workspace' ? context.defaultWorkspaceId : '', options)
     }
-    return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input), options)
+    try {
+      return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input), options)
+    } catch (error) {
+      if (error instanceof ObsidianElicitationRequired) throw error
+      if (
+        !(error instanceof ToolInputError)
+        || error.message !== 'Workspace selector does not match an available grant'
+        || context.kind !== 'client'
+        || !options.refreshClientGrants
+      ) {
+        throw error
+      }
+      await refreshClientGrants(context, options)
+      return await executeToolCallUnsafe(name, input, resolveWorkspace(context, input), options)
+    }
   } catch (error) {
+    if (error instanceof ObsidianElicitationRequired) throw error
     return toSafeToolError(error)
   }
 }
@@ -794,7 +813,10 @@ async function executeToolCallUnsafe(
             throw new ToolInputError(error instanceof Error ? error.message : 'Obsidian vault authorization is unavailable')
           }
           const vault = await openAuthorizedVault(config)
-          return runObsidianImportBatch(approved, vault, config.stateDir, { batchSize: size })
+          return runObsidianImportBatch(approved, vault, config.stateDir, {
+            batchSize: size,
+            onProgress: options.reportProgress,
+          })
         })
         return { type: 'obsidian_import_batch', result: await run(stored, batchSize.value) }
       }
@@ -843,7 +865,7 @@ async function executeToolCallUnsafe(
           existingTypes: objectTypes,
           assumptions: Array.isArray(input['assumptions']) ? input['assumptions'].map((entry) => String(entry).trim()).filter(Boolean).slice(0, 20) : [],
         })
-        storeCustomDatabasePlan(plan)
+        await writeCustomDatabasePlan(plan)
         return { type: 'custom_database_plan', plan, summary: summarizeCustomDatabasePlan(plan) }
       }
 
@@ -851,7 +873,7 @@ async function executeToolCallUnsafe(
         const planId = readString(input['plan_id'])
         const planHash = readString(input['plan_hash'])
         if (!planId || !planHash) return invalidInput('Plan ID and plan hash are required')
-        const plan = CUSTOM_DATABASE_PLANS.get(`${workspaceId}:${planId}`)
+        const plan = await readCustomDatabasePlan(workspaceId, planId)
         if (!plan || plan.planHash !== planHash) return invalidInput('The custom database plan is missing, expired, or does not match the approved hash')
         const existingTypes = await listAuroraObjectTypes(workspaceId)
         const applicable = assertApplicableCustomDatabasePlan(plan, workspaceId, existingTypes)

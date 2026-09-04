@@ -5,7 +5,7 @@ import type {
   ListPromptsResult,
   ListResourceTemplatesResult,
   ReadResourceResult,
-} from '@modelcontextprotocol/sdk/types.js'
+} from '@modelcontextprotocol/server'
 import type { AuroraConnectionContext } from './contracts.js'
 import { listAuroraObjectTypes, listAuroraTemplatesPage, listObjectsPage } from './auroraClient.js'
 import { CUSTOM_DATABASE_RECIPES } from './customDatabases.js'

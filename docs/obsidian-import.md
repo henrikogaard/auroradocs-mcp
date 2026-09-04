@@ -35,8 +35,10 @@ Configure the local MCP child process with:
 `AURORA_OBSIDIAN_VAULT_ROOT` is required and must be an absolute real
 directory. `AURORA_MCP_STATE_DIR` is optional and must remain outside the
 vault; by default the server uses a private `.auroradocs-mcp` directory for the
-current user. Removing the root variable disables all Obsidian tools while
-ordinary AuroraCloud tools keep working.
+current user. That directory also stores reviewable custom-database plans.
+Removing the root variable disables all Obsidian tools while ordinary
+AuroraCloud tools keep working. Import batches report progress on the
+originating tool call when the client sends a progress token.
 
 This environment setting authorizes read-only analysis only. The reader never
 scans parents or siblings, follows symlinks, runs plugins, reads `.git`, trash,

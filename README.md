@@ -19,7 +19,8 @@ also apply the bounded [read-only agent profiles](docs/agent-profiles.md).
 - an AuroraDocs account with an AuroraCloud-backed workspace
 - permission to create an MCP token for that workspace
 - a supported local MCP client: Claude Desktop, Claude Code, Codex, or another
-  client that can start a stdio server
+  client that can start a stdio server. Claude Desktop can also install the
+  `.mcpb` bundle from this repository instead of editing JSON.
 
 Browser-only workspaces and Local folders workspaces are not AuroraCloud MCP
 destinations. By default the server does not read a browser tab or local
@@ -111,8 +112,15 @@ MCP-token authentication only.
 
 ### Claude Desktop
 
-Open Claude Desktop's developer settings and edit its MCP configuration. Add
-this server under `mcpServers`, preserving any servers already present:
+For one-click install, pack `auroradocs.mcpb` with `pnpm pack:mcpb` and install
+it from Claude Desktop **Settings → Extensions → Advanced settings → Install
+Extension…**. The extension asks for the AuroraCloud API URL and the MCP token
+(the token is stored in the OS keychain). Optional fields authorize one Obsidian
+vault and a private plan/journal directory.
+
+To configure it by hand, open Claude Desktop's developer settings and edit its
+MCP configuration. Add this server under `mcpServers`, preserving any servers
+already present:
 
 ```json
 {
@@ -220,9 +228,12 @@ E2EE all stop before AuroraDocs writes.
 
 Imports run in resume-safe batches, keep private plan metadata plus a
 content-free progress journal outside the vault, survive MCP process restarts,
-and never modify the source. Back up both systems first and start
-with a small test workspace. See [Obsidian import](docs/obsidian-import.md) for
-configuration, mapping, consent, recovery, and fidelity limits.
+and never modify the source. Custom-database plans use the same private state
+directory. `list_workspaces` re-reads the current grant set from AuroraCloud, so
+a new or revoked grant is visible without restarting the MCP process. Back up
+both systems first and start with a small test workspace. See
+[Obsidian import](docs/obsidian-import.md) for configuration, mapping, consent,
+recovery, and fidelity limits.
 
 Analysis rejects more than 256 MiB of eligible Markdown/Canvas source files,
 and hidden, plugin, Git, cache, trash, and other ignored paths cannot be read as
@@ -262,7 +273,8 @@ the old token. Tokens cannot be extended or recovered.
 ## Security model
 
 - The MCP protocol process is local and stdio-only; AuroraDocs does not provide
-  a hosted MCP HTTP, SSE, or OAuth endpoint.
+  a hosted MCP HTTP, SSE, or OAuth endpoint. The server speaks MCP 2026-07-28
+  and still serves 2025-era stdio clients.
 - AuroraCloud checks workspace membership, token scopes, the member's current
   role, expiry, revocation, rate limits, and audit events on requests.
 - E2EE content that is locked or unavailable is reported that way. The server

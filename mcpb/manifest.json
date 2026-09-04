@@ -1,0 +1,71 @@
+{
+  "manifest_version": "0.3",
+  "name": "auroradocs",
+  "display_name": "AuroraDocs",
+  "version": "0.2.1",
+  "description": "Connect Claude Desktop to independently granted AuroraCloud workspaces over local stdio.",
+  "long_description": "AuroraDocs MCP runs on this computer and calls the AuroraCloud API. It does not host an MCP HTTP endpoint. Use an `aur_mcp_client_` credential with owner-approved workspace grants. Optional Obsidian import reads one vault you authorize and never modifies the source.",
+  "author": {
+    "name": "Henrik Øgård",
+    "url": "https://github.com/henrikogaard/auroradocs-mcp"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/henrikogaard/auroradocs-mcp.git"
+  },
+  "homepage": "https://github.com/henrikogaard/auroradocs-mcp#readme",
+  "documentation": "https://github.com/henrikogaard/auroradocs-mcp/blob/main/docs/setup.md",
+  "support": "https://github.com/henrikogaard/auroradocs-mcp/issues",
+  "license": "Apache-2.0",
+  "keywords": ["auroradocs", "auroracloud", "workspace", "obsidian"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "AURORA_API_URL": "${user_config.api_url}",
+        "AURORA_API_TOKEN": "${user_config.api_token}",
+        "AURORA_OBSIDIAN_VAULT_ROOT": "${user_config.obsidian_vault_root}",
+        "AURORA_MCP_STATE_DIR": "${user_config.state_dir}"
+      }
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20"
+    }
+  },
+  "user_config": {
+    "api_url": {
+      "type": "string",
+      "title": "AuroraCloud API URL",
+      "description": "AuroraCloud REST API. This is not an MCP URL.",
+      "default": "https://api.auroradocs.eu",
+      "required": true
+    },
+    "api_token": {
+      "type": "string",
+      "title": "MCP token",
+      "description": "The one-time aur_mcp_client_ credential. Stored in the OS keychain.",
+      "sensitive": true,
+      "required": true
+    },
+    "obsidian_vault_root": {
+      "type": "directory",
+      "title": "Obsidian vault (optional)",
+      "description": "Absolute path authorizing read-only analysis of one vault. Leave empty to disable Obsidian tools.",
+      "required": false
+    },
+    "state_dir": {
+      "type": "directory",
+      "title": "Private state directory (optional)",
+      "description": "Directory for import journals and reviewable plans. Must stay outside the vault. Defaults to ~/.auroradocs-mcp.",
+      "required": false
+    }
+  }
+}
