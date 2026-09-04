@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Speak MCP revision 2026-07-28 on stdio while still serving 2025-era clients
+  from the same process.
+- Persist custom-database plans in `AURORA_MCP_STATE_DIR` so apply survives an
+  MCP process restart.
+- Re-fetch client workspace grants on `list_workspaces` and when a selector
+  misses the in-process snapshot.
+- Report Obsidian import progress on the originating tool call when the client
+  sends a progress token.
+- Ship a Claude Desktop `.mcpb` manifest and `pnpm pack:mcpb` packager.
+
+### Changed
+
+- Replaced `@modelcontextprotocol/sdk` 1.x with the v2 `@modelcontextprotocol/server`
+  package and `serveStdio`.
+- Obsidian import consent now uses Multi Round-Trip Requests (`input_required`)
+  on 2026 clients. 2025 form elicitation is served by the SDK shim. Clients
+  that advertise no elicitation still use `confirmed: true`.
+
 ## [0.2.1] - 2026-08-17
 
 ### Added

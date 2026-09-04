@@ -74,6 +74,24 @@ async function copiedVault() {
   return { root, vaultRoot, stateDir, vault }
 }
 
+test('import batches report progress against the originating request totals', async () => {
+  const { vault, stateDir } = await copiedVault()
+  const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))
+  const plan = buildObsidianImportPlan(analysis, 'workspace-1', { ids: { planId: 'plan-progress-1' }, now: '2026-07-19T10:00:00Z', expiresAt: '2026-07-19T10:30:00Z' })
+  const reports: Array<{ completed: number; total: number }> = []
+  const fake = fakeDependencies()
+  await runObsidianImportBatch({ plan, analysis }, vault, stateDir, {
+    batchSize: 50,
+    dependencies: fake.dependencies,
+    onProgress: (progress) => { reports.push({ ...progress }) },
+  })
+  assert.ok(reports.length >= 2)
+  assert.equal(reports[0]?.completed, 0)
+  assert.equal(reports[0]?.total, plan.entries.length)
+  assert.equal(reports.at(-1)?.total, plan.entries.length)
+  assert.ok((reports.at(-1)?.completed ?? 0) > 0)
+})
+
 test('bounded two-pass import resumes to completion without duplicate types, objects, content, or attachments', async () => {
   const { vault, stateDir } = await copiedVault()
   const analysis = await analyzeObsidianVault(vault, new Date('2026-07-19T10:00:00Z'))

@@ -4,9 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
-import { ElicitRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { Client, InMemoryTransport } from '@modelcontextprotocol/client'
 import type { AuroraConnectionContext } from './contracts.js'
 import { createAuroraMcpServer } from './server.js'
 import { analyzeObsidianVault } from './obsidian/analyzer.js'
@@ -92,7 +90,7 @@ test('server uses advertised form elicitation and decline returns a write-free n
     { capabilities: { elicitation: { form: {} } } },
   )
   let elicitationCount = 0
-  client.setRequestHandler(ElicitRequestSchema, async (request) => {
+  client.setRequestHandler('elicitation/create', async (request) => {
     elicitationCount += 1
     assert.equal(request.params.mode, 'form')
     assert.match(request.params.message, new RegExp(plan.planId))

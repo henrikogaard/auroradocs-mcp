@@ -19,11 +19,9 @@
  *   AURORA_API_EMAIL     AuroraCloud user email (legacy/dev fallback)
  *   AURORA_API_PASSWORD  AuroraCloud user password (legacy/dev fallback)
  */
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { authenticate } from './auroraClient.js'
 import { createAuroraMcpServer } from './server.js'
-
-// ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
   let context
@@ -37,10 +35,7 @@ async function main() {
     process.exit(1)
   }
 
-  const server = createAuroraMcpServer(context)
-
-  const transport = new StdioServerTransport()
-  await server.connect(transport)
+  serveStdio(() => createAuroraMcpServer(context))
   process.stderr.write('AuroraDocs MCP server running.\n')
 }
 

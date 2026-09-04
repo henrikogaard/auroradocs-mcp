@@ -2,3 +2,5 @@ node_modules/
 dist/
 .turbo/
 *.tgz
+auroradocs.mcpb
+.mcpb-staging/

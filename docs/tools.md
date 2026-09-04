@@ -59,7 +59,7 @@ including object lookup and startup membership verification.
 
 | Tool | What it does | Scopes |
 | --- | --- | --- |
-| `list_workspaces` | List only the workspaces independently granted to a client credential. | Client credential; no workspace selector |
+| `list_workspaces` | List only the workspaces independently granted to a client credential. Re-reads the live grant set from AuroraCloud. | Client credential; no workspace selector |
 | `search_objects` | Search object titles, optionally by type. | `read:objects` |
 | `search` | Alias for `search_objects`. | `read:objects` |
 | `list_objects` | List object metadata, optionally by type. | `read:objects` |

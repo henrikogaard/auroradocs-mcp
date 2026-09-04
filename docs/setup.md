@@ -9,7 +9,8 @@ stdio; it is not a hosted MCP endpoint.
 - Node.js 20 or newer, with `npx` available to the MCP client
 - an AuroraDocs account and an AuroraCloud-backed workspace
 - workspace owner or admin permission to create an MCP key
-- Claude Desktop, Claude Code, Codex, or another stdio-capable MCP client
+- Claude Desktop, Claude Code, Codex, or another stdio-capable MCP client.
+  Claude Desktop can install the `.mcpb` bundle instead of a JSON server entry.
 
 Browser-only and Local folders workspaces are not supported.
 
@@ -87,6 +88,13 @@ Generic stdio configuration:
   }
 }
 ```
+
+Claude Desktop can install a local `.mcpb` bundle instead of that JSON. From a
+checkout run `pnpm pack:mcpb`, then in Claude Desktop open **Settings →
+Extensions → Advanced settings → Install Extension…** and choose
+`auroradocs.mcpb`. Enter the API URL and MCP token there. The token is stored
+in the OS keychain. Optional fields authorize one Obsidian vault and a private
+state directory.
 
 For Hermes and OpenClaw, restrict exposed tools to the read-only profile in
 [Agent profiles](agent-profiles.md). Never expose the credential to an agent

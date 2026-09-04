@@ -1,5 +1,5 @@
-import os from 'node:os'
 import path from 'node:path'
+import { resolveMcpStateDir } from '../mcpState.js'
 
 export type ObsidianImportConfig = {
   vaultRoot: string
@@ -18,8 +18,7 @@ export function resolveObsidianConfig(
   if (!rawRoot) throw new Error('AURORA_OBSIDIAN_VAULT_ROOT is required to authorize vault analysis.')
   if (!path.isAbsolute(rawRoot)) throw new Error('AURORA_OBSIDIAN_VAULT_ROOT must be an absolute path.')
   const vaultRoot = path.resolve(rawRoot)
-  const rawStateDir = env['AURORA_MCP_STATE_DIR']?.trim()
-  const stateDir = path.resolve(rawStateDir || path.join(os.homedir(), '.auroradocs-mcp'))
+  const stateDir = resolveMcpStateDir(env)
   if (isInside(vaultRoot, stateDir)) {
     throw new Error('AURORA_MCP_STATE_DIR must be outside the authorized Obsidian vault.')
   }
