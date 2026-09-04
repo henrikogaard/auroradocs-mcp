@@ -108,6 +108,29 @@ test('apply_custom_database_plan reloads an approved plan from the MCP state dir
   }
 })
 
+test('apply_custom_database_plan treats a malformed plan ID as non-retryable invalid input', async () => {
+  const previousState = process.env['AURORA_MCP_STATE_DIR']
+  const stateDir = await mkdtemp(path.join(tmpdir(), 'aurora-malformed-plan-'))
+  try {
+    process.env['AURORA_MCP_STATE_DIR'] = stateDir
+    for (const planId of ['../escape', `plan-${'x'.repeat(128)}`]) {
+      const result = await executeToolCall('apply_custom_database_plan', {
+        plan_id: planId,
+        plan_hash: 'not-a-real-hash',
+      }, 'workspace-1')
+      assert.deepEqual(result, {
+        type: 'error',
+        code: 'invalid_input',
+        message: 'The custom database plan is missing, expired, or does not match the approved hash',
+        retryable: false,
+      })
+    }
+  } finally {
+    if (previousState === undefined) delete process.env['AURORA_MCP_STATE_DIR']
+    else process.env['AURORA_MCP_STATE_DIR'] = previousState
+  }
+})
+
 test('direct template creation rejects unsupported default value types before network access', async () => {
   const result = await executeToolCall('create_template', {
     type: 'page',

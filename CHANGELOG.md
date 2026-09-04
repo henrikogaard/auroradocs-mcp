@@ -9,7 +9,8 @@ All notable changes to this project are documented in this file.
 - Speak MCP revision 2026-07-28 on stdio while still serving 2025-era clients
   from the same process.
 - Persist custom-database plans in `AURORA_MCP_STATE_DIR` so apply survives an
-  MCP process restart.
+  MCP process restart. Malformed apply `plan_id` values are non-retryable
+  `invalid_input`, not internal failures.
 - Re-fetch client workspace grants on `list_workspaces` and when a selector
   misses the in-process snapshot.
 - Report Obsidian import progress on the originating tool call when the client

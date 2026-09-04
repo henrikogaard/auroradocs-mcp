@@ -4,6 +4,7 @@ import {
   hashCustomDatabasePlan,
   type CustomDatabasePlan,
 } from './customDatabases.js'
+import { ToolInputError } from './errors.js'
 import {
   mcpStatePersistenceEnabled,
   resolveMcpStateDir,
@@ -18,8 +19,12 @@ function planKey(workspaceId: string, planId: string): string {
   return `${workspaceId}:${planId}`
 }
 
+function isPersistedPlanId(planId: string): boolean {
+  return /^[A-Za-z0-9_-]{1,128}$/.test(planId)
+}
+
 function planFileName(planId: string): string {
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(planId)) throw new Error('Invalid custom database plan ID')
+  if (!isPersistedPlanId(planId)) throw new ToolInputError('Invalid custom database plan ID')
   return `custom-database-plan-${planId}.json`
 }
 
@@ -85,6 +90,7 @@ export async function readCustomDatabasePlan(
 ): Promise<CustomDatabasePlan | null> {
   const memory = getStoredCustomDatabasePlan(workspaceId, planId)
   if (memory) return memory
+  if (!isPersistedPlanId(planId)) return null
   if (!mcpStatePersistenceEnabled(env) && !env['AURORA_MCP_STATE_DIR']?.trim()) return null
   const file = path.join(resolveMcpStateDir(env), planFileName(planId))
   let serialized: string
