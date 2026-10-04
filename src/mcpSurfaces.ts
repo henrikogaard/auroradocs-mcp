@@ -18,7 +18,7 @@ const PROJECT_CONTEXT_URI = /^aurora:\/\/workspaces\/((?:[A-Za-z0-9._~-]|%[0-9A-
 
 export function getAuroraServerInstructions(): string {
   return [
-    'Use get_mcp_tool_coverage and get_mcp_workflow_recipes to discover AuroraDocs capabilities and required scopes.',
+    'Use get_mcp_tool_coverage and get_mcp_workflow_recipes to discover Aurora capabilities and required scopes.',
     'When the client supports MCP completions, use them to select authorized workspace, project, object-type, recipe, and template prompt/resource arguments without guessing.',
     'With an aur_mcp_client_ credential, call list_workspaces first and pass the exact workspace_id or an unambiguous workspace_alias to every workspace tool.',
     'Prefer read tools first. Treat scopes as independent and call write tools only when the user requested the change, the required scopes are granted, and explicit user approval exists for the exact proposed action.',
@@ -81,7 +81,7 @@ export async function completeAuroraArgument(
   if (params.ref.type === 'ref/prompt') {
     const promptName = params.ref.name
     if (!getAuroraPromptDefinitions().some((prompt) => prompt.name === promptName)) {
-      throw new ToolInputError('Unknown AuroraDocs prompt completion reference')
+      throw new ToolInputError('Unknown Aurora prompt completion reference')
     }
     if (params.argument.name === 'workspace_id') {
       return completion(workspaceValues(context, 'id'), params.argument.value)
@@ -119,11 +119,11 @@ export async function completeAuroraArgument(
         page.page < page.totalPages,
       )
     }
-    throw new ToolInputError('Unsupported AuroraDocs prompt completion argument')
+    throw new ToolInputError('Unsupported Aurora prompt completion argument')
   }
 
   if (params.ref.uri !== PROJECT_CONTEXT_URI_TEMPLATE) {
-    throw new ToolInputError('Unknown AuroraDocs resource completion reference')
+    throw new ToolInputError('Unknown Aurora resource completion reference')
   }
   if (params.argument.name === 'workspaceId') {
     return completion(workspaceValues(context, 'id'), params.argument.value)
@@ -135,7 +135,7 @@ export async function completeAuroraArgument(
     const projects = assertCompletionWorkspace(page.items, workspaceId)
     return completion(projects.map((project) => project.id), params.argument.value, page.page < page.totalPages)
   }
-  throw new ToolInputError('Unsupported AuroraDocs resource completion argument')
+  throw new ToolInputError('Unsupported Aurora resource completion argument')
 }
 
 function requiredArgument(arguments_: Record<string, unknown>, name: string): string {
@@ -178,7 +178,7 @@ export function getResumeProjectPrompt(arguments_: Record<string, unknown>): Get
     ? `query ${JSON.stringify(query)}`
     : `project_id ${JSON.stringify(projectId)}`
   const text = [
-    `Resume the AuroraDocs project using ${describeWorkspaceSelector(workspace)} and ${selector}.`,
+    `Resume the Aurora project using ${describeWorkspaceSelector(workspace)} and ${selector}.`,
     `First call get_project_context with this exact ${workspace.name} and project selector.`,
     'Distinguish unavailable sections from sections that are available but empty; do not infer missing facts.',
     'Ground factual claims in the returned sources and cite sourceId and deepLink.',
@@ -188,7 +188,7 @@ export function getResumeProjectPrompt(arguments_: Record<string, unknown>): Get
   ].join('\n')
 
   return {
-    description: 'Resume an AuroraDocs project from citation-ready, read-only workspace context.',
+    description: 'Resume an Aurora project from citation-ready, read-only workspace context.',
     messages: [{ role: 'user', content: { type: 'text', text } }],
   }
 }
@@ -198,7 +198,7 @@ export function getCustomDatabaseDesignPrompt(arguments_: Record<string, unknown
   const useCase = optionalArgument(arguments_, 'use_case')
   const objectType = optionalArgument(arguments_, 'object_type')
   const text = [
-    `Design a custom AuroraDocs database using ${describeWorkspaceSelector(workspace)}${useCase ? ` for ${JSON.stringify(useCase)}` : ''}${objectType ? ` with existing object-type selector ${JSON.stringify(objectType)}` : ''}.`,
+    `Design a custom Aurora database using ${describeWorkspaceSelector(workspace)}${useCase ? ` for ${JSON.stringify(useCase)}` : ''}${objectType ? ` with existing object-type selector ${JSON.stringify(objectType)}` : ''}.`,
     'First call list_object_types, get_custom_database_recipes, and list_templates to reuse existing structures when possible.',
     'Use a starter recipe when it fits; otherwise propose a concise free-form schema whose property keys and value types match the tool contract.',
     'Keep changes additive: never delete properties, change a property value type, weaken a required field, or silently retarget a relation.',
@@ -217,7 +217,7 @@ export function getTemplateInstantiationPrompt(arguments_: Record<string, unknow
   const template = requiredArgument(arguments_, 'template')
   const objectId = optionalArgument(arguments_, 'object_id')
   const text = [
-    `Create an AuroraDocs object using ${describeWorkspaceSelector(workspace)} and template selector ${JSON.stringify(template)}${objectId ? ` with planned object ID ${JSON.stringify(objectId)}` : ''}.`,
+    `Create an Aurora object using ${describeWorkspaceSelector(workspace)} and template selector ${JSON.stringify(template)}${objectId ? ` with planned object ID ${JSON.stringify(objectId)}` : ''}.`,
     'First call list_templates and resolve the selector to one unambiguous template in this workspace.',
     'Show the resolved template ID, type, copied title/defaults/content behavior, and optional planned object ID.',
     'Wait for explicit user approval before calling create_from_template with the exact resolved template ID and optional approved object ID.',
@@ -253,14 +253,14 @@ export function getAuroraPrompt(name: string, arguments_: Record<string, unknown
   if (name === 'custom_database_design') return getCustomDatabaseDesignPrompt(arguments_)
   if (name === 'template_instantiation') return getTemplateInstantiationPrompt(arguments_)
   if (name === 'obsidian_import') return getObsidianImportPrompt(arguments_)
-  throw new ToolInputError('Unknown AuroraDocs prompt')
+  throw new ToolInputError('Unknown Aurora prompt')
 }
 
 export function getAuroraPromptDefinitions(): ListPromptsResult['prompts'] {
   return [
     {
       name: 'resume_project',
-      title: 'Resume AuroraDocs project',
+      title: 'Resume Aurora project',
       description: 'Load citation-ready project context and summarize blockers and next actions without writing.',
       arguments: [
         { name: 'workspace_id', description: 'Granted workspace ID; provide exactly one workspace ID or alias' },
@@ -271,7 +271,7 @@ export function getAuroraPromptDefinitions(): ListPromptsResult['prompts'] {
     },
     {
       name: 'custom_database_design',
-      title: 'Design a custom AuroraDocs database',
+      title: 'Design a custom Aurora database',
       description: 'Plan an additive custom object type and optional reusable template, then wait for approval before apply.',
       arguments: [
         { name: 'workspace_id', description: 'Granted workspace ID; provide exactly one workspace ID or alias' },
@@ -282,7 +282,7 @@ export function getAuroraPromptDefinitions(): ListPromptsResult['prompts'] {
     },
     {
       name: 'template_instantiation',
-      title: 'Create from an AuroraDocs template',
+      title: 'Create from an Aurora template',
       description: 'Resolve one reusable template and wait for explicit approval before creating an object from it.',
       arguments: [
         { name: 'workspace_id', description: 'Granted workspace ID; provide exactly one workspace ID or alias' },
@@ -306,9 +306,9 @@ export function getAuroraPromptDefinitions(): ListPromptsResult['prompts'] {
 export function getAuroraResourceTemplates(): ListResourceTemplatesResult['resourceTemplates'] {
   return [{
     name: 'project_context',
-    title: 'AuroraDocs project context',
+    title: 'Aurora project context',
     uriTemplate: PROJECT_CONTEXT_URI_TEMPLATE,
-    description: 'Citation-ready, normalized context for a project in a granted AuroraDocs workspace.',
+    description: 'Citation-ready, normalized context for a project in a granted Aurora workspace.',
     mimeType: 'application/json',
   }]
 }

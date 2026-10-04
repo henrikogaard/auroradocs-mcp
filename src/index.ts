@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * AuroraDocs MCP Server
+ * Aurora MCP Server
  *
- * Exposes AuroraDocs workspace data to Claude Desktop and other MCP clients.
+ * Exposes Aurora workspace data to Claude Desktop and other MCP clients.
  * Uses the MCP stdio transport — add it to claude_desktop_config.json.
  *
  * SECURITY:
@@ -31,15 +31,15 @@ async function main() {
       workspaceId: process.env['AURORA_WORKSPACE_ID'],
     })
   } catch {
-    process.stderr.write('AuroraDocs MCP authentication failed.\n')
+    process.stderr.write('Aurora MCP authentication failed.\n')
     process.exit(1)
   }
 
   serveStdio(() => createAuroraMcpServer(context))
-  process.stderr.write('AuroraDocs MCP server running.\n')
+  process.stderr.write('Aurora MCP server running.\n')
 }
 
 main().catch(() => {
-  process.stderr.write('AuroraDocs MCP server failed to start.\n')
+  process.stderr.write('Aurora MCP server failed to start.\n')
   process.exit(1)
 })

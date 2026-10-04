@@ -89,7 +89,7 @@ test('2026-07-28 form elicitation declines import without writes', async () => {
     assert.equal(result.isError, false)
     assert.deepEqual(result.structuredContent, {
       type: 'no_op',
-      message: 'Obsidian import was not approved; no AuroraDocs writes were performed.',
+      message: 'Obsidian import was not approved; no Aurora writes were performed.',
     })
     assert.equal(elicitationCount, 1)
   } finally {

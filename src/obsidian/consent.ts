@@ -49,7 +49,7 @@ export function buildObsidianConsentElicitation(preview: ObsidianConsentPreview)
       `Import Obsidian plan ${preview.planId} (${preview.planHash}) from ${preview.vaultDisplayName} into workspace ${preview.workspaceId}?`,
       `${preview.counts.customGroups} custom types, ${preview.counts.templates} templates, ${preview.counts.notes} notes, ${preview.counts.canvases} Canvas files, and ${preview.counts.attachments} referenced attachments are planned.`,
       `Policies: hierarchy=${preview.policies.hierarchy}, collisions=${preview.policies.collisions}, attachments=${preview.policies.attachments}, unsupported=${preview.policies.unsupported}.`,
-      'The source vault will remain read-only. AuroraDocs writes are additive and run as one resumable bounded batch.',
+      'The source vault will remain read-only. Aurora writes are additive and run as one resumable bounded batch.',
     ].join('\n'),
     requestedSchema: {
       type: 'object',

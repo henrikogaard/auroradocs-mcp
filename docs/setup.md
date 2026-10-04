@@ -7,7 +7,7 @@ stdio; it is not a hosted MCP endpoint.
 ## Requirements
 
 - Node.js 20 or newer, with `npx` available to the MCP client
-- an AuroraDocs account and an AuroraCloud-backed workspace
+- an Aurora account and an AuroraCloud-backed workspace
 - workspace owner or admin permission to create an MCP key
 - Claude Desktop, Claude Code, Codex, or another stdio-capable MCP client.
   Claude Desktop can install the `.mcpb` bundle instead of a JSON server entry.
@@ -20,7 +20,7 @@ New installations should use one client identity. Its `aur_mcp_client_`
 credential authenticates the installation but grants no workspace access by
 itself. Each workspace owner approves access independently.
 
-1. In AuroraDocs, open **Settings → Workspace → MCP Access** as the workspace
+1. In Aurora, open **Settings → Workspace → MCP Access** as the workspace
    owner and select **Enable MCP access**. New workspaces deny MCP access by
    default until an owner enables the policy.
 2. Select **Register client**, enter a client and device label such as
@@ -60,7 +60,7 @@ Every new client entry provides these values:
 
 | Variable | Value |
 | --- | --- |
-| `AURORA_API_URL` | `https://api.auroradocs.eu` |
+| `AURORA_API_URL` | `https://api.aurora.ink` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
 
 For the `0.3.0` Obsidian importer, add these only after backing up the source
@@ -71,7 +71,7 @@ vault and choosing a test destination:
 | `AURORA_OBSIDIAN_VAULT_ROOT` | Absolute path to the single vault authorized for read-only analysis |
 | `AURORA_MCP_STATE_DIR` | Optional absolute private plan/journal directory outside the vault; defaults to the current user's `.auroradocs-mcp` directory |
 
-The vault-root variable does not authorize AuroraDocs writes. The later import
+The vault-root variable does not authorize Aurora writes. The later import
 tool has a separate review and acceptance gate. Removing the variable disables
 Obsidian tools without affecting normal AuroraCloud tools. See
 [Obsidian import](obsidian-import.md).
@@ -83,7 +83,7 @@ Generic stdio configuration:
   "command": "npx",
   "args": ["-y", "@henrikogard/auroradocs-mcp@0.3.0"],
   "env": {
-    "AURORA_API_URL": "https://api.auroradocs.eu",
+    "AURORA_API_URL": "https://api.aurora.ink",
     "AURORA_API_TOKEN": "REDACTED"
   }
 }
@@ -108,7 +108,7 @@ explicit `AURORA_WORKSPACE_ID`.
 
 ### Create an MCP key
 
-1. Sign in to AuroraDocs and open the workspace you want the client to use.
+1. Sign in to Aurora and open the workspace you want the client to use.
 2. Open **Settings → Workspace → MCP Access**.
 3. Enter a label that identifies the client and device.
 4. Select the minimum scopes required for the intended workflow.
@@ -147,11 +147,11 @@ Every client entry must provide these values:
 
 | Variable | Value |
 | --- | --- |
-| `AURORA_API_URL` | `https://api.auroradocs.eu` |
+| `AURORA_API_URL` | `https://api.aurora.ink` |
 | `AURORA_WORKSPACE_ID` | the Workspace ID copied from MCP Access |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_` token |
 
-Do not configure an AuroraDocs email or password.
+Do not configure an Aurora email or password.
 
 ### Claude Desktop
 
@@ -166,7 +166,7 @@ servers, then restart Claude Desktop:
       "command": "npx",
       "args": ["-y", "@henrikogard/auroradocs-mcp@0.3.0"],
       "env": {
-        "AURORA_API_URL": "https://api.auroradocs.eu",
+        "AURORA_API_URL": "https://api.aurora.ink",
         "AURORA_WORKSPACE_ID": "WORKSPACE_ID",
         "AURORA_API_TOKEN": "REDACTED"
       }
@@ -179,7 +179,7 @@ servers, then restart Claude Desktop:
 
 ```bash
 claude mcp add --transport stdio --scope user \
-  --env AURORA_API_URL=https://api.auroradocs.eu \
+  --env AURORA_API_URL=https://api.aurora.ink \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
   auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.3.0
@@ -191,7 +191,7 @@ Run `claude mcp get auroradocs` to inspect the saved entry.
 
 ```bash
 codex mcp add \
-  --env AURORA_API_URL=https://api.auroradocs.eu \
+  --env AURORA_API_URL=https://api.aurora.ink \
   --env AURORA_WORKSPACE_ID=WORKSPACE_ID \
   --env AURORA_API_TOKEN=REDACTED \
   auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.3.0

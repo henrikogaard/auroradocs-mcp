@@ -13,7 +13,7 @@ const requiredReadmeText = [
   '90 days',
   'shown only once',
   'aur_mcp_',
-  'https://api.auroradocs.eu',
+  'https://api.aurora.ink',
   'AURORA_WORKSPACE_ID',
   'Claude Desktop',
   'Claude Code',

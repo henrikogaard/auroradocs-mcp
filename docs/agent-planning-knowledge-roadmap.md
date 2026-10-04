@@ -23,7 +23,7 @@ remains available as a compatibility path during migration.
 
 ## Purpose
 
-AuroraDocs MCP should make Aurora the durable, human-visible project brain for
+Aurora MCP should make Aurora the durable, human-visible project brain for
 agents such as Hermes and OpenClaw. Agent runtimes keep their own private,
 short-lived session memory. Aurora owns the project state people need to review,
 edit, share, resume, and audit:
@@ -41,7 +41,7 @@ add-ons.
 
 ## Product boundary
 
-AuroraDocs is the canonical system of record for project knowledge and
+Aurora is the canonical system of record for project knowledge and
 planning. It does not replace an agent runtime's conversation memory, personal
 profile, scratchpad, skill learning, execution sandbox, scheduler, or subagent
 orchestration.

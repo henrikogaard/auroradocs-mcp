@@ -804,7 +804,7 @@ async function executeToolCallUnsafe(
         if (consent.outcome !== 'accepted') {
           const message = consent.outcome === 'adjustment_required'
             ? 'Import not started. Re-analyze with the requested policy or group changes, then review the new plan.'
-            : 'Obsidian import was not approved; no AuroraDocs writes were performed.'
+            : 'Obsidian import was not approved; no Aurora writes were performed.'
           return { type: 'no_op', message }
         }
         const run = options.runObsidianImport ?? (async (approved, size) => {

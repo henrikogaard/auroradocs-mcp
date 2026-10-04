@@ -1,6 +1,6 @@
 # Tools and scopes
 
-AuroraDocs MCP `0.3.0` exposes the tools below to a connected client. An
+Aurora MCP `0.3.0` exposes the tools below to a connected client. An
 `aur_mcp_client_` credential can discover its independently granted workspaces
 with `list_workspaces`; every workspace data call then selects one grant with
 `workspace_id` or an unambiguous `workspace_alias`. A legacy `aur_mcp_` token
@@ -124,7 +124,7 @@ as execution constraints, not suggestions.
 | Obsidian dry run | `read:objects` plus local vault authorization | "Analyze the configured vault, show the plan and warnings, and do not import." |
 | Approved Obsidian import | `read:objects`, `write:objects`, `write:content` | "After my later acceptance, import bounded batches with this exact plan ID/hash and report status." |
 
-`delete_object` is a write operation even though AuroraDocs uses reversible
+`delete_object` is a write operation even though Aurora uses reversible
 soft deletion. Treat it as destructive from the client's point of view.
 Use `restore_object` for an explicitly identified trashed object; repeated calls
 are safe and report `changed: false` when the object is already active.

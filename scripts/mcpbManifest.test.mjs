@@ -16,7 +16,7 @@ test('Claude Desktop extension manifest is a local stdio bundle with a keychain 
   assert.equal(manifest.server.mcp_config.env.AURORA_API_TOKEN, '${user_config.api_token}')
   assert.equal(manifest.user_config.api_token.sensitive, true)
   assert.equal(manifest.user_config.api_token.required, true)
-  assert.equal(manifest.user_config.api_url.default, 'https://api.auroradocs.eu')
+  assert.equal(manifest.user_config.api_url.default, 'https://api.aurora.ink')
   assert.equal(manifest.tools_generated, true)
   assert.match(manifest.compatibility.runtimes.node, />=20/)
   assert.doesNotMatch(JSON.stringify(manifest), /createMcpHandler|Streamable HTTP/)

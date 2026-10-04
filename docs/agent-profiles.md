@@ -1,6 +1,6 @@
 # Agent profiles
 
-AuroraDocs exposes one vendor-neutral MCP server contract. Hermes, OpenClaw,
+Aurora exposes one vendor-neutral MCP server contract. Hermes, OpenClaw,
 and other agents should filter that contract to the smallest tool set needed
 for each role instead of enabling every available tool.
 
