@@ -179,7 +179,7 @@ test('prompt catalog and dispatcher expose all guided workflows', () => {
     'resume_project', 'custom_database_design', 'template_instantiation', 'obsidian_import',
   ])
   assert.equal(getAuroraPrompt('custom_database_design', { workspace_id: 'workspace-1' }).messages.length, 1)
-  assert.throws(() => getAuroraPrompt('missing', {}), /Unknown AuroraDocs prompt/)
+  assert.throws(() => getAuroraPrompt('missing', {}), /Unknown Aurora prompt/)
 })
 
 test('completion provider suggests projects, object types, recipes, and templates in one granted workspace', async () => {

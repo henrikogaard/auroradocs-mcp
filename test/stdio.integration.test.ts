@@ -114,7 +114,7 @@ test('authentication failure diagnostics do not expose private startup context',
       })
 
       assert.equal(result.exitCode, 1)
-      assert.equal(result.stderr, 'AuroraDocs MCP authentication failed.\n')
+      assert.equal(result.stderr, 'Aurora MCP authentication failed.\n')
       for (const secret of [privateUserId, privateWorkspaceId, privateToken, privateUpstreamText]) {
         assert.doesNotMatch(result.stderr, new RegExp(secret))
       }
@@ -303,8 +303,8 @@ test('an external stdio client can list and invoke the MCP coverage tool', async
     assert.match(membershipFilter ?? '', /workspace_id = "workspace-test"/)
     assert.match(membershipFilter ?? '', /user_id = "user-test"/)
 
-    assert.match(stderr, /AuroraDocs MCP authenticated\./)
-    assert.match(stderr, /AuroraDocs MCP server running\./)
+    assert.match(stderr, /Aurora MCP authenticated\./)
+    assert.match(stderr, /Aurora MCP server running\./)
     for (const secret of [userId, workspaceId, token, recordTitle]) {
       assert.doesNotMatch(stderr, new RegExp(secret))
     }

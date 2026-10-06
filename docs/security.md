@@ -1,6 +1,6 @@
 # Security boundaries
 
-AuroraDocs MCP is a local protocol bridge to AuroraCloud. It does not turn a
+Aurora MCP is a local protocol bridge to AuroraCloud. It does not turn a
 workspace into a public or hosted MCP endpoint.
 
 ## Credential boundary
@@ -14,7 +14,7 @@ The legacy `aur_mcp_` token is a workspace-scoped service credential pinned to
 `AURORA_WORKSPACE_ID`. Neither credential is a user session, an account-wide
 API key, or a substitute for an email and password. Public setups use only:
 
-- `AURORA_API_URL=https://api.auroradocs.eu`
+- `AURORA_API_URL=https://api.aurora.ink`
 - `AURORA_API_TOKEN`
 
 Set `AURORA_WORKSPACE_ID` only for a legacy `aur_mcp_` token. Do not set it for
@@ -29,9 +29,9 @@ reuse one token across unrelated clients.
 ## Transport boundary
 
 The package runs locally over stdio. It does not listen on a network port and
-AuroraDocs does not currently offer a hosted HTTP, SSE, WebSocket, or OAuth MCP
+Aurora does not currently offer a hosted HTTP, SSE, WebSocket, or OAuth MCP
 endpoint. The local process speaks MCP 2026-07-28 and still serves 2025-era
-stdio clients. `https://api.auroradocs.eu` is the AuroraCloud REST API used by
+stdio clients. `https://api.aurora.ink` is the AuroraCloud REST API used by
 the local process, not an MCP endpoint.
 
 Do not expose the stdio process through a network proxy or paste its credential
@@ -55,7 +55,7 @@ token and API process. A `429` response includes `retry-after`.
 
 ## E2EE behavior
 
-The local MCP process does not hold AuroraDocs end-to-end encryption keys. When
+The local MCP process does not hold Aurora end-to-end encryption keys. When
 E2EE content is locked or otherwise unavailable, tools return a locked or
 unavailable state. They must not expose stored ciphertext as if it were readable
 document content.
@@ -64,7 +64,7 @@ document content.
 
 Only AuroraCloud-backed workspaces participate in the membership and MCP-token
 model. Browser-only workspaces and Local folders workspaces are unsupported.
-The server does not scan local AuroraDocs data or silently promote a workspace
+The server does not scan local Aurora data or silently promote a workspace
 to AuroraCloud.
 
 ## Local Obsidian vault boundary

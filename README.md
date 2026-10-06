@@ -1,8 +1,8 @@
-# AuroraDocs MCP Server
+# Aurora MCP Server
 
 `@henrikogard/auroradocs-mcp` connects a local MCP client to independently
 granted AuroraCloud workspaces. It runs on your computer over stdio and sends
-authenticated requests to `https://api.auroradocs.eu`.
+authenticated requests to `https://api.aurora.ink`.
 
 The public package is `@henrikogard/auroradocs-mcp` and the executable is
 `aurora-mcp`. The latest published package and current source version are
@@ -16,7 +16,7 @@ also apply the bounded [read-only agent profiles](docs/agent-profiles.md).
 ## Requirements
 
 - Node.js 20 or newer
-- an AuroraDocs account with an AuroraCloud-backed workspace
+- an Aurora account with an AuroraCloud-backed workspace
 - permission to create an MCP token for that workspace
 - a supported local MCP client: Claude Desktop, Claude Code, Codex, or another
   client that can start a stdio server. Claude Desktop can also install the
@@ -36,7 +36,7 @@ steps below remain available during the legacy migration window.
 
 ### Legacy workspace token
 
-1. Sign in to AuroraDocs and open the AuroraCloud workspace you want to use.
+1. Sign in to Aurora and open the AuroraCloud workspace you want to use.
 2. Go to **Settings → Workspace → MCP Access**.
 3. Enter a label that identifies the client, such as `Personal laptop — Codex`.
 4. Select the minimum scopes the client needs. Start with `read:objects`; add
@@ -97,7 +97,7 @@ New client credentials require these environment variables:
 
 | Variable | Value |
 | --- | --- |
-| `AURORA_API_URL` | `https://api.auroradocs.eu` |
+| `AURORA_API_URL` | `https://api.aurora.ink` |
 | `AURORA_API_TOKEN` | the one-time `aur_mcp_client_` credential |
 | `AURORA_OBSIDIAN_VAULT_ROOT` | optional absolute path authorizing read-only analysis of one Obsidian vault |
 | `AURORA_MCP_STATE_DIR` | optional private plan/journal directory outside that vault |
@@ -107,7 +107,7 @@ only its owner-approved grants with `list_workspaces`; each data call then
 selects a workspace explicitly. A legacy `aur_mcp_` token still requires
 `AURORA_WORKSPACE_ID` during the migration window.
 
-Do not configure an AuroraDocs email or password. Public onboarding supports
+Do not configure an Aurora email or password. Public onboarding supports
 MCP-token authentication only.
 
 ### Claude Desktop
@@ -129,7 +129,7 @@ already present:
       "command": "npx",
       "args": ["-y", "@henrikogard/auroradocs-mcp@0.3.0"],
       "env": {
-        "AURORA_API_URL": "https://api.auroradocs.eu",
+        "AURORA_API_URL": "https://api.aurora.ink",
         "AURORA_API_TOKEN": "REDACTED"
       }
     }
@@ -148,7 +148,7 @@ Options must appear before the server name:
 
 ```bash
 claude mcp add --transport stdio --scope user \
-  --env AURORA_API_URL=https://api.auroradocs.eu \
+  --env AURORA_API_URL=https://api.aurora.ink \
   --env AURORA_API_TOKEN=REDACTED \
   auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.3.0
 ```
@@ -163,7 +163,7 @@ The installed Codex CLI accepts `--env` for local stdio servers:
 
 ```bash
 codex mcp add \
-  --env AURORA_API_URL=https://api.auroradocs.eu \
+  --env AURORA_API_URL=https://api.aurora.ink \
   --env AURORA_API_TOKEN=REDACTED \
   auroradocs -- npx -y @henrikogard/auroradocs-mcp@0.3.0
 ```
@@ -179,14 +179,14 @@ Use this valid generic JSON shape when a client accepts an MCP server object:
   "command": "npx",
   "args": ["-y", "@henrikogard/auroradocs-mcp@0.3.0"],
   "env": {
-    "AURORA_API_URL": "https://api.auroradocs.eu",
+    "AURORA_API_URL": "https://api.aurora.ink",
     "AURORA_API_TOKEN": "REDACTED"
   }
 }
 ```
 
 The client must launch the process locally and communicate over stdio. Do not
-configure `https://api.auroradocs.eu` as an MCP HTTP/SSE URL; it is the API the
+configure `https://api.aurora.ink` as an MCP HTTP/SSE URL; it is the API the
 local server calls, not a hosted MCP endpoint.
 
 ## Agent discovery and recovery
@@ -204,7 +204,7 @@ inputs continue to use the bounded discovery tools documented in the
 
 ## Custom databases and templates
 
-AuroraDocs MCP can discover existing object types/templates, offer starter
+Aurora MCP can discover existing object types/templates, offer starter
 recipes for contacts, interests, equipment, subscriptions, and expenses, and
 plan an arbitrary special-purpose schema. Use `plan_custom_database` first,
 review the exact plan ID/hash, then call `apply_custom_database_plan` only after
@@ -224,7 +224,7 @@ first returns a reviewable plan, then asks through MCP form elicitation when the
 client supports it. A compatibility client must wait for a later user message
 and send the exact plan ID/hash with `confirmed: true`. Decline, cancel,
 malformed confirmation, stale source state, missing scopes, viewer access, and
-E2EE all stop before AuroraDocs writes.
+E2EE all stop before Aurora writes.
 
 Imports run in resume-safe batches, keep private plan metadata plus a
 content-free progress journal outside the vault, survive MCP process restarts,
@@ -272,7 +272,7 @@ the old token. Tokens cannot be extended or recovered.
 
 ## Security model
 
-- The MCP protocol process is local and stdio-only; AuroraDocs does not provide
+- The MCP protocol process is local and stdio-only; Aurora does not provide
   a hosted MCP HTTP, SSE, or OAuth endpoint. The server speaks MCP 2026-07-28
   and still serves 2025-era stdio clients.
 - AuroraCloud checks workspace membership, token scopes, the member's current
@@ -323,3 +323,8 @@ providing it through your local secret environment. See
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Aurora uses `https://api.aurora.ink` in new connection examples and the desktop
+extension default. Existing configurations using `https://api.auroradocs.eu`
+remain valid. The package `@henrikogard/auroradocs-mcp`, executable `aurora-mcp`,
+MCP server identity, resource URIs, and private state directory stay unchanged.

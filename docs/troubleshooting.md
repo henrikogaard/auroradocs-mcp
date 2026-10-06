@@ -10,7 +10,7 @@ logs, screenshots, issues, or support messages. Use the token fingerprint from
 | --- | --- | --- |
 | Client reports `spawn npx ENOENT` | Node.js/npm is missing from the client's PATH. | Install Node.js 20 or newer, confirm `node --version` and `npx --version`, then restart the client. |
 | Server exits with `AURORA_WORKSPACE_ID environment variable is required` | A legacy `aur_mcp_` token is missing its pinned workspace ID. | Copy it again from MCP Access. Client credentials must use `aur_mcp_client_` and omit this variable. |
-| Server exits with `AURORA_API_URL environment variable is required` | The API URL is missing. | Set it to `https://api.auroradocs.eu`. Do not add `/mcp`. |
+| Server exits with `AURORA_API_URL environment variable is required` | The API URL is missing. | Set it to `https://api.aurora.ink`. Do not add `/mcp`. |
 | Authentication is missing | `AURORA_API_TOKEN` was not passed to the child process. | Add the MCP token environment variable to the server entry. Do not use email/password authentication. |
 | Client shows no tools | The stdio process failed, is still connecting, or the client has stale configuration. | Inspect the client's MCP status, confirm the command is `npx -y @henrikogard/auroradocs-mcp@0.3.0`, then restart the client. |
 | JSON configuration will not load | Invalid JSON, usually a missing comma or an overwritten outer `mcpServers` object. | Validate the file as JSON and merge the server entry with existing entries. JSON cannot contain comments. |

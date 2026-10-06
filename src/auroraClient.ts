@@ -215,7 +215,7 @@ export async function authenticate(options: AuthenticateOptions = {}): Promise<A
     client.authStore.save(token, null)
     if (token.startsWith('aur_mcp_client_')) {
       const workspaces = await listGrantedWorkspaces()
-      process.stderr.write('AuroraDocs MCP authenticated.\n')
+      process.stderr.write('Aurora MCP authenticated.\n')
       return { kind: 'client', workspaces }
     }
     if (!workspaceId) throw new Error('AURORA_WORKSPACE_ID environment variable is required for legacy credentials')
@@ -246,7 +246,7 @@ export async function authenticate(options: AuthenticateOptions = {}): Promise<A
   if (!members.items.length) {
     throw new Error('Authenticated user is not a member of the configured workspace')
   }
-  process.stderr.write('AuroraDocs MCP authenticated.\n')
+  process.stderr.write('Aurora MCP authenticated.\n')
   return { kind: 'legacy_workspace', defaultWorkspaceId: workspaceId, workspaces: [] }
 }
 

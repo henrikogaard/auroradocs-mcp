@@ -4,7 +4,7 @@
 > or newer.
 
 The importer converts one explicitly authorized local Obsidian vault into an
-AuroraCloud-backed AuroraDocs workspace. It is analyze-first, consent-gated,
+AuroraCloud-backed Aurora workspace. It is analyze-first, consent-gated,
 additive, bounded, and resumable. It never modifies the source vault.
 
 ## Before you start
@@ -19,7 +19,7 @@ additive, bounded, and resumable. It never modifies the source vault.
    the analyzed inventory remains stable.
 
 Plaintext import into E2EE workspaces is blocked. The local MCP process has no
-AuroraDocs encryption keys and cannot make those writes safe.
+Aurora encryption keys and cannot make those writes safe.
 
 ## Authorize one source root
 
@@ -90,7 +90,7 @@ expired plan is a write-free result.
 ## Mapping behavior
 
 - Markdown headings, paragraphs, emphasis, code, links, lists, task lists,
-  quotes, fenced code, and tables map to AuroraDocs structured content.
+  quotes, fenced code, and tables map to Aurora structured content.
 - Wiki links, aliases, headings, and block references resolve against the
   analyzed vault. Under `preserve`, ambiguous, broken, or unsupported links
   remain readable text with warnings; under `skip`, their unresolved fallback

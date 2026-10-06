@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "private": false,
   "type": "module",
-  "description": "AuroraCloud-first MCP server that exposes AuroraDocs workspace data to Claude Desktop and other AI agents",
+  "description": "AuroraCloud-first MCP server that exposes Aurora workspace data to Claude Desktop and other AI agents",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

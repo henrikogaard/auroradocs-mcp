@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately to
-[contact@auroradocs.eu](mailto:contact@auroradocs.eu). Do not open a public
+[contact@aurora.ink](mailto:contact@aurora.ink). Do not open a public
 GitHub issue or discussion for a security report.
 
 Include a concise description, the affected `@henrikogard/auroradocs-mcp`

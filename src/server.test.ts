@@ -112,7 +112,7 @@ test('server uses advertised form elicitation and decline returns a write-free n
     assert.equal(result.isError, false)
     assert.deepEqual(result.structuredContent, {
       type: 'no_op',
-      message: 'Obsidian import was not approved; no AuroraDocs writes were performed.',
+      message: 'Obsidian import was not approved; no Aurora writes were performed.',
     })
     assert.equal(elicitationCount, 1)
   } finally {

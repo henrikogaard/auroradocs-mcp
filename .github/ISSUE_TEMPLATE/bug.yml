@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible, non-sensitive AuroraDocs MCP defect
+description: Report a reproducible, non-sensitive Aurora MCP defect
 title: "[Bug]: "
 labels:
   - bug
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve AuroraDocs MCP Server. Do not paste MCP tokens, credentials, raw configuration files, workspace IDs, workspace contents, private links, or production user data. Report suspected vulnerabilities privately using SECURITY.md.
+        Thanks for helping improve Aurora MCP Server. Do not paste MCP tokens, credentials, raw configuration files, workspace IDs, workspace contents, private links, or production user data. Report suspected vulnerabilities privately using SECURITY.md.
   - type: input
     id: version
     attributes:
