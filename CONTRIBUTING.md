@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for helping improve AuroraDocs MCP Server.
+Thank you for helping improve Aurora MCP Server.
 
 ## Before you start
 
@@ -61,7 +61,7 @@ repository.
 Keep pull requests focused. Explain the user-visible effect, identify the
 verification performed, and call out skipped checks or known limitations.
 Documentation changes should work for readers who have no access to the
-AuroraDocs monorepo or private project context.
+Aurora monorepo or private project context.
 
 ## Releases
 

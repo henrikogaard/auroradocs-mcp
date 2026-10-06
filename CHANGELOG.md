@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed the product to Aurora in descriptions, diagnostics, the desktop
+  extension display name and the docs. Connection examples and the desktop
+  extension default now use `https://api.aurora.ink`; configurations using
+  `https://api.auroradocs.eu` keep working. The npm package, `aurora-mcp`
+  executable, extension name, server identity and state directory are unchanged.
+- The security and conduct contact is now `contact@aurora.ink`.
+
 ## [0.3.0] - 2026-09-05
 
 ### Added
