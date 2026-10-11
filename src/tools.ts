@@ -6,7 +6,7 @@
  * No cross-workspace or cross-user data leakage is possible.
  */
 import {
-  listObjectsPage,
+  listVisibleObjects,
   getObject,
   getContent,
   setContent,
@@ -51,6 +51,7 @@ import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
 import { readBoundedInteger, readWorkspaceSelector } from './input.js'
 import { ToolInputError, toSafeToolError } from './errors.js'
+import { isHiddenSystemObjectType, uncreatableObjectTypeReason } from './objectTypes.js'
 import { getProjectContext, listProjectChanges } from './projectContext.js'
 import {
   CUSTOM_DATABASE_RECIPES,
@@ -606,6 +607,7 @@ async function executeToolCallUnsafe(
         const sources = await searchObjectsPage(workspaceId, query, limit.value)
         const matches = [...new Map(
           sources
+            .filter((source) => !isHiddenSystemObjectType(source.objectType))
             .filter((source) => !typeFilter || source.objectType === typeFilter)
             .map((source) => [source.objectId, {
               id: source.objectId,
@@ -621,8 +623,9 @@ async function executeToolCallUnsafe(
         const typeFilter = input['type'] ? String(input['type']) : undefined
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
         if (!limit.ok) return invalidInput(limit.message)
-        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value, { excludeTemplates: true })
-        const results = page.items
+        if (isHiddenSystemObjectType(typeFilter)) return invalidInput(`${typeFilter} objects are internal to Aurora and cannot be listed`)
+        const objects = await listVisibleObjects(workspaceId, typeFilter, limit.value, { excludeTemplates: true })
+        const results = objects
           .filter((o) => !o.is_template)
           .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
         return { type: 'objects', objects: results }
@@ -632,8 +635,9 @@ async function executeToolCallUnsafe(
         const typeFilter = input['type'] ? String(input['type']) : undefined
         const limit = readBoundedInteger(input, 'limit', { defaultValue: 20, min: 1, max: 50 })
         if (!limit.ok) return invalidInput(limit.message)
-        const page = await listObjectsPage(workspaceId, typeFilter, 1, limit.value, { excludeTemplates: true })
-        const results = page.items
+        if (isHiddenSystemObjectType(typeFilter)) return invalidInput(`${typeFilter} objects are internal to Aurora and cannot be listed`)
+        const objects = await listVisibleObjects(workspaceId, typeFilter, limit.value, { excludeTemplates: true })
+        const results = objects
           .filter((o) => !o.is_template)
           .map((o) => ({ id: o.id, title: o.title, type: o.type, icon: o.icon }))
         return { type: 'objects', objects: results }
@@ -1089,6 +1093,8 @@ async function executeToolCallUnsafe(
       case 'create_object': {
         const type = String(input['type'] ?? 'page')
         if (type === 'task') return invalidInput('Use create_task for tasks')
+        const refusal = uncreatableObjectTypeReason(type)
+        if (refusal) return invalidInput(refusal)
         const title = String(input['title'] ?? 'Untitled')
         const obj = await createObject(workspaceId, type, title)
         return { type: 'created', id: obj.id, title: obj.title ?? title }

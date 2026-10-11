@@ -62,7 +62,7 @@ including object lookup and startup membership verification.
 | `list_workspaces` | List only the workspaces independently granted to a client credential. Re-reads the live grant set from AuroraCloud. | Client credential; no workspace selector |
 | `search_objects` | Search object titles, optionally by type. | `read:objects` |
 | `search` | Alias for `search_objects`. | `read:objects` |
-| `list_objects` | List object metadata, optionally by type. | `read:objects` |
+| `list_objects` | List object metadata, optionally by type. Internal `task_list`/`workspace_config` objects are never listed. | `read:objects` |
 | `list_recent` | List recently updated objects. | `read:objects` |
 | `wiki_search` | Search workspace knowledge and return source records. | `read:objects`, `search` |
 | `wiki_get_page` | Read one source; the client can omit full text from its result. | `read:objects`, `read:content` |
@@ -91,7 +91,7 @@ including object lookup and startup membership verification.
 | `get_project_context` | Load a bounded, citation-ready project resume packet. | `read:objects`; add `read:content`, `read:tasks`, and `search` for all optional sections |
 | `list_project_changes` | Read bounded project changes after a required cursor. | `read:objects` |
 | `schedule_task_block` | Schedule a task or create a task-backed time block. | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
-| `create_object` | Create a non-task object. | `read:objects`, `write:objects` |
+| `create_object` | Create a non-task object. Refuses `task`, internal `task_list`/`workspace_config` and retired `research_*` types. | `read:objects`, `write:objects` |
 | `create_task` | Create a task and its task properties. | `read:objects`, `write:tasks`, `write:objects` |
 | `update_task` | Update fields on an existing task. | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
 | `update_object_title` | Rename an object. | `read:objects`, `write:objects` |

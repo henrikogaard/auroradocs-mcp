@@ -7,6 +7,7 @@
  */
 import type { AuroraConnectionContext, ContentReadResult, GrantedWorkspace } from './contracts.js'
 import { AuroraApiError, ToolInputError, ToolNotFoundError } from './errors.js'
+import { isHiddenSystemObjectType, uncreatableObjectTypeReason } from './objectTypes.js'
 import type {
   CustomDatabaseTemplateDefault,
   ObjectTypeDef,
@@ -310,7 +311,33 @@ export async function listObjectsPage(
   if (options.excludeTemplates) filters.push('is_template = false')
   const filter = client.filter(filters.join(' && '), params)
   const result = await client.collection('objects').listPage({ filter, sort: '-updated_at', page, perPage })
-  return { ...result, items: result.items.map(mapObject) }
+  const items = result.items.map(mapObject)
+  // Hidden system objects (workspace_config, task_list) are infrastructure, not
+  // content. The collection filter cannot exclude a type, so they are dropped
+  // here; only a caller that names the type explicitly gets them.
+  return { ...result, items: type && isHiddenSystemObjectType(type) ? items : items.filter((item) => !isHiddenSystemObjectType(item.type)) }
+}
+
+/**
+ * Up to `limit` visible objects, newest first. Hidden system objects are
+ * dropped page by page, so they never use up the caller's limit.
+ */
+export async function listVisibleObjects(
+  workspaceId: string,
+  type: string | undefined,
+  limit: number,
+  options: { excludeTemplates?: boolean; maxPages?: number } = {},
+): Promise<AuroraObjectRecord[]> {
+  if (type && isHiddenSystemObjectType(type)) throw new ToolInputError(`${type} objects are internal to Aurora and cannot be listed`)
+  const output: AuroraObjectRecord[] = []
+  // Full pages, so a run of hidden rows cannot exhaust the page budget for a small limit.
+  const maxPages = options.maxPages ?? 20
+  for (let page = 1; page <= maxPages && output.length < limit; page += 1) {
+    const result = await listObjectsPage(workspaceId, type, page, 50, { excludeTemplates: options.excludeTemplates })
+    output.push(...result.items)
+    if (!result.totalPages || page >= result.totalPages) break
+  }
+  return output.slice(0, limit)
 }
 
 export async function searchObjectsPage(
@@ -321,13 +348,20 @@ export async function searchObjectsPage(
   return searchWorkspaceKnowledgeServer(workspaceId, query, limit)
 }
 
-export async function getObject(id: string, workspaceId: string): Promise<AuroraObjectRecord | null> {
+export async function getObject(
+  id: string,
+  workspaceId: string,
+  options: { includeHidden?: boolean } = {},
+): Promise<AuroraObjectRecord | null> {
   const client = getAuroraClient()
   try {
     const r = await client.collection('objects').get(id)
     const obj = mapObject(r)
     // SECURITY: reject objects outside the configured workspace
     if (obj.workspace_id !== workspaceId) return null
+    // Hidden system objects are not content: to every object tool they do not
+    // exist, so they cannot be read, edited, deleted or restored by id.
+    if (!options.includeHidden && isHiddenSystemObjectType(obj.type)) return null
     return obj
   } catch (error) {
     if (
@@ -344,6 +378,8 @@ export async function createObject(
   title: string,
   options: { id?: string; icon?: string | null; parentId?: string | null; isTemplate?: boolean } = {},
 ): Promise<AuroraObjectRecord> {
+  const refusal = uncreatableObjectTypeReason(type)
+  if (refusal) throw new ToolInputError(refusal)
   const client = getAuroraClient()
   const r = await client.collection('objects').create({
     ...(options.id ? { id: options.id } : {}),
@@ -1260,6 +1296,8 @@ function normalizeWorkspaceKnowledgeResponse(
     ? payload.items
         .map((item) => normalizeWorkspaceKnowledgeSource(item))
         .filter((item): item is WorkspaceKnowledgeSource => item !== null)
+        // Hidden system objects are never knowledge, whichever wiki tool asked.
+        .filter((item) => !isHiddenSystemObjectType(item.objectType))
     : []
   return {
     workspaceId: typeof payload?.workspaceId === 'string' ? payload.workspaceId : '',

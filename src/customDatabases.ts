@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
+import { isHiddenSystemObjectType, isRetiredObjectType } from './objectTypes.js'
 
 export const CUSTOM_DATABASE_CONTRACT_VERSION = 1 as const
 export const CUSTOM_DATABASE_PLAN_TTL_MS = 30 * 60 * 1000
@@ -107,7 +108,6 @@ const VALUE_TYPES = new Set<PropertyValueType>([
 const BUILTIN_RELATION_TARGETS = new Set([
   'page', 'note', 'daily', 'task', 'database', 'collection', 'canvas', 'bookmark', 'file',
   'space', 'people', 'meetings', 'trips', 'projects', 'images', 'quotes', 'links', 'backlog',
-  'research_project', 'research_source', 'research_session', 'research_artifact', 'research_image',
   'habit', 'transaction', 'site',
 ])
 
@@ -256,6 +256,9 @@ export function validateCustomDatabaseSchema(
       let target = input.targetType?.trim()
       if (target === 'self') target = options.selfTargetType
       if (!target) throw new Error(`Relation target for "${key}" is required`)
+      if (isRetiredObjectType(target) || isHiddenSystemObjectType(target)) {
+        throw new Error(`Relation target for "${key}" is not available: ${target}`)
+      }
       if (options.existingTypes && !BUILTIN_RELATION_TARGETS.has(target) && target !== options.selfTargetType && !customTargets.has(target)) {
         throw new Error(`Relation target for "${key}" does not resolve: ${target}`)
       }

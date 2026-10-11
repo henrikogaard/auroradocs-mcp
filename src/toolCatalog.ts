@@ -1151,7 +1151,7 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
   },
   {
     name: 'create_object',
-    description: 'Create a new non-task object (page, note, bookmark, etc.) in the workspace. Use create_task for tasks.',
+    description: 'Create a new non-task object (page, note, bookmark, etc.) in the workspace. Use create_task for tasks. Internal types (task_list, workspace_config) and retired Research Studio types (research_*) are refused.',
     inputSchema: {
       type: 'object',
       properties: {
