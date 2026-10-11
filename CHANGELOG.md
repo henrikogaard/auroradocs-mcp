@@ -4,8 +4,51 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-11
+
+Brings the server in line with AuroraCloud changes since 0.3.0. The legacy
+`task_lists` collection is due to be removed from AuroraCloud; 0.3.0 depends
+on it, so update before then.
+
+### Fixed
+
+- Task lists are read from Aurora's `task_list` objects instead of the frozen
+  legacy `task_lists` table, so lists created or renamed in the app since the
+  switch are listed and can be used by `create_task` and `update_task`. Lists
+  not yet converted are still read from the legacy table while it exists.
+  `task_list_id` is written as text, as the app reads it. End-to-end encrypted
+  list names are counted and explained instead of shown (#35).
+- Task statuses come from the workspace's synced status settings, falling back
+  to Aurora's built-ins `Backlog`, `Todo`, `In Progress` and `Done`. The wrong
+  `To Do`, `In Review` and `Cancelled` are gone. `list_task_statuses` reports
+  each status's group (`todo`, `inProgress`, `done`), a task counts as complete
+  when its status is in the done group, and unknown statuses are rejected
+  (#36).
+- Completing a recurring task with `update_task` creates its next occurrence
+  the same way the app does, with the same occurrence id, so the series no
+  longer stops and nothing is created twice (#39).
+- Aurora's hidden `workspace_config` and `task_list` objects no longer appear
+  in `list_objects`, `list_recent`, search or `get_object`, and cannot be
+  edited or deleted by id (#37).
+- `create_object` refuses `task_list`, `workspace_config` and the retired
+  Research Studio types (`research_*`), which are also no longer offered as
+  custom-database relation targets (#38).
+- Clear errors for an unconfirmed email address
+  (`email_verification_required`), for a role that may read but not change an
+  object (`write_refused`), and for retired AuroraCloud resources (410 Gone,
+  no longer retried) (#40).
+- Task assignees and labels are written the way the app stores them: assignees
+  as comma-separated user ids in `assignee`, labels comma-separated in `tags`.
+  Earlier versions wrote JSON under `assignees` and `labels`, which the app did
+  not show. Values in the app's format are now read, and empty lists clear the
+  field. Labels written by earlier versions are moved to `tags` the next time
+  the task is changed. Assignees written by earlier versions are shown until
+  assignees are next set, and are then replaced (#47).
+
 ### Changed
 
+- `list_task_statuses` is now workspace-scoped and adds `status_definitions`
+  and `source` to its result; `update_task` may return `next_occurrence`.
 - Renamed the product to Aurora in descriptions, diagnostics, the desktop
   extension display name and the docs. Connection examples and the desktop
   extension default now use `https://api.aurora.ink`; configurations using

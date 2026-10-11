@@ -1,6 +1,6 @@
 # Tools and scopes
 
-Aurora MCP `0.3.0` exposes the tools below to a connected client. An
+Aurora MCP `0.3.1` exposes the tools below to a connected client. An
 `aur_mcp_client_` credential can discover its independently granted workspaces
 with `list_workspaces`; every workspace data call then selects one grant with
 `workspace_id` or an unambiguous `workspace_alias`. A legacy `aur_mcp_` token
