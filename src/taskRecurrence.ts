@@ -106,7 +106,8 @@ function successorDefaults(props: AuroraPropertyRecord[], status: string, dueDat
   ]
   const priority = text('priority')
   if (priority) writes.push({ key: 'priority', valueType: 'select', field: 'value_text', value: priority })
-  const assignees = parseList(get('assignee')?.value_text, get('assignees')?.value_text)
+  // Like the app, only the current `assignee` is carried over; see `taskAssignees`.
+  const assignees = parseList(get('assignee')?.value_text)
   if (assignees.length) writes.push({ key: 'assignee', valueType: 'text', field: 'value_text', value: assignees.join(',') })
   const tags = parseList(get('tags')?.value_text, get('labels')?.value_text)
   if (tags.length) writes.push({ key: 'tags', valueType: 'text', field: 'value_text', value: tags.join(',') })

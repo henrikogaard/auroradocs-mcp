@@ -1179,18 +1179,15 @@ function propsToTaskProps(props: AuroraPropertyRecord[], objectId: string): Auro
     status: get('status')?.value_text ?? null,
     priority: get('priority')?.value_text ?? null,
     due_date: get('due_date')?.value_date ?? get('due_date')?.value_text ?? null,
-    assignees: (() => {
-      const raw = get('assignees')?.value_text
-      if (!raw) return []
-      try { return JSON.parse(raw) as string[] } catch { return [] }
-    })(),
+    assignees: taskAssignees(get('assignee')?.value_text, get('assignees')?.value_text),
     labels: parseTaskListProperty(get('tags')?.value_text, get('labels')?.value_text),
     description: get('description')?.value_text ?? null,
     task_list_id: get('task_list_id')?.value_text ?? get('task_list_id')?.value_ref ?? null,
   }
 }
 
-function parseTaskListProperty(...values: Array<string | null | undefined>): string[] {
+/** Values from comma-separated text (Aurora's format) or a JSON array (older MCP writes), deduplicated. */
+export function parseTaskListProperty(...values: Array<string | null | undefined>): string[] {
   const items: string[] = []
   for (const raw of values) {
     if (!raw) continue
@@ -1206,6 +1203,19 @@ function parseTaskListProperty(...values: Array<string | null | undefined>): str
     items.push(...raw.split(',').map((entry) => entry.trim()).filter(Boolean))
   }
   return [...new Set(items)]
+}
+
+/**
+ * Assignee user ids. Aurora keeps them comma-separated in `assignee`, and that
+ * value wins: older MCP versions wrote a JSON array under `assignees`, which is
+ * only shown when `assignee` is empty, so a reassignment made in the app is
+ * never hidden by a stale MCP value. It is never copied into `assignee` on its
+ * own: an empty `assignee` may be the app clearing everyone (Aurora deletes the
+ * row, leaving no trace), so only an explicit assignee change replaces it.
+ */
+export function taskAssignees(assignee: string | null | undefined, legacyAssignees: string | null | undefined): string[] {
+  const current = parseTaskListProperty(assignee)
+  return current.length ? current : parseTaskListProperty(legacyAssignees)
 }
 
 export async function updateTaskProps(
@@ -1230,21 +1240,57 @@ export async function updateTaskProps(
   if (patch.description !== undefined) triples.push({ key: 'description', valueType: 'text', value: patch.description })
   // Aurora stores the list id as text (auroradocs tasks.ts); a ref would not be read back by the app.
   if (patch.task_list_id !== undefined) triples.push({ key: 'task_list_id', valueType: 'text', value: patch.task_list_id })
-  if (patch.assignees !== undefined) triples.push({ key: 'assignees', valueType: 'text', value: JSON.stringify(patch.assignees) })
-  if (patch.labels !== undefined) triples.push({ key: 'labels', valueType: 'text', value: JSON.stringify(patch.labels) })
 
-  if (!triples.length) return
+  if (!triples.length && patch.assignees === undefined && patch.labels === undefined) return
 
   // Batch: fetch all existing properties for this object in one request, then
   // partition by key. This avoids one list request per field (N+1 within a
   // single update_task call).
-  const existing = await listProperties([objectId], workspaceId, { maxPages: 100 })
+  const existing = (await listProperties([objectId], workspaceId, { maxPages: 100 }))
+    .filter((record) => record.object_id === objectId)
   const existingByKey = new Map<string, string>()
+  const recordByKey = new Map<string, AuroraPropertyRecord>()
   for (const record of existing) {
     const key = record.key
     if (key && !existingByKey.has(key)) {
       existingByKey.set(key, record.id)
+      recordByKey.set(key, record)
     }
+  }
+
+  // Assignees and labels in Aurora's format (auroradocs tasks.ts
+  // `writeTaskMetadata`): user ids comma-separated in `assignee`, labels
+  // comma-separated in `tags`, and the legacy `labels` key emptied. JSON
+  // `labels` from an older MCP are moved into `tags` on the next write to the
+  // task, so the app reads them properly. Older MCP `assignees` are replaced
+  // when assignees are next set (see `taskAssignees` for why not sooner).
+  // The MCP can neither decrypt nor re-encrypt end-to-end encrypted values, so
+  // writing over them would destroy them (and store the new value in plain text).
+  // Refuse before anything is written.
+  const encrypted = (...keys: string[]) => keys.some((key) => isEncryptedMetadataValue(recordByKey.get(key)?.value_text))
+  if (patch.assignees !== undefined && encrypted('assignee', 'assignees')) {
+    throw new ToolInputError("This task's assignees are end-to-end encrypted, so the MCP server cannot change them. Change them in Aurora.")
+  }
+  if (patch.labels !== undefined && encrypted('tags', 'labels')) {
+    throw new ToolInputError("This task's labels are end-to-end encrypted, so the MCP server cannot change them. Change them in Aurora.")
+  }
+  if (patch.assignees !== undefined) {
+    const assignees = normalizeTaskList(patch.assignees)
+    triples.push({ key: 'assignee', valueType: 'text', value: assignees.length ? assignees.join(',') : null })
+    if (recordByKey.get('assignees')?.value_text) triples.push({ key: 'assignees', valueType: 'text', value: null })
+  }
+  const legacyLabels = recordByKey.get('labels')?.value_text
+  const currentTags = recordByKey.get('tags')?.value_text
+  // Older MCP JSON labels are merged into `tags`, as both the app and the MCP
+  // read the two keys together, unless `tags` is end-to-end encrypted (left to the app).
+  const labels = patch.labels !== undefined
+    ? normalizeTaskList(patch.labels)
+    : legacyLabels?.trim().startsWith('[') && !isEncryptedMetadataValue(currentTags)
+      ? parseTaskListProperty(currentTags, legacyLabels)
+      : null
+  if (labels) {
+    triples.push({ key: 'tags', valueType: 'text', value: labels.length ? labels.join(',') : null })
+    if (legacyLabels) triples.push({ key: 'labels', valueType: 'text', value: null })
   }
 
   for (const { key, valueType, value } of triples) {
@@ -1284,6 +1330,11 @@ export async function updateTaskProps(
     }
     // If clearing and no existing record, there is nothing to clear.
   }
+}
+
+/** Trimmed, deduplicated entries; a comma inside one splits it, as Aurora reads the stored text. */
+function normalizeTaskList(values: readonly string[]): string[] {
+  return [...new Set(values.flatMap((value) => value.split(',')).map((value) => value.trim()).filter(Boolean))]
 }
 
 // ── Planning helpers ─────────────────────────────────────────────────────────

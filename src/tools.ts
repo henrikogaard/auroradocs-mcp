@@ -1163,15 +1163,13 @@ async function executeToolCallUnsafe(
         // Resolved first, so an unknown status or list changes nothing.
         const resolved = await resolveTaskInput(input, workspaceId)
         const patch = resolved.patch
-        if ('title' in input) {
-          const newTitle = readString(input['title'])
-          if (!newTitle) return invalidInput('Task title cannot be empty')
-          await updateObjectTitle(id, newTitle, workspaceId)
-          changedFields.push('title')
-        }
+        const newTitle = 'title' in input ? readString(input['title']) : undefined
+        if ('title' in input && !newTitle) return invalidInput('Task title cannot be empty')
 
+        // Properties first: updateTaskProps refuses (e.g. encrypted labels)
+        // before writing anything, and then the title is left unchanged too.
         if (Object.keys(patch).length > 0) {
-          await updateTaskProps(id, workspaceId, patch)
+          await updateTaskProps(id, workspaceId, patch, { existingObject: obj })
           if (patch.status !== undefined) changedFields.push('status')
           if (patch.priority !== undefined) changedFields.push('priority')
           if (patch.due_date !== undefined) changedFields.push('due_date')
@@ -1179,6 +1177,10 @@ async function executeToolCallUnsafe(
           if (patch.labels !== undefined) changedFields.push('labels')
           if (patch.description !== undefined) changedFields.push('description')
           if (patch.task_list_id !== undefined) changedFields.push('task_list')
+        }
+        if (newTitle) {
+          await updateObjectTitle(id, newTitle, workspaceId)
+          changedFields.unshift('title')
         }
 
         // Completing a recurring task creates its next occurrence, as the app does.

@@ -907,7 +907,7 @@ test('schedule_task_block creates a task-backed time block with default scheduli
       new Map(createdProperties.map((property) => [property['key'], property])),
       new Map([
         ['due_date', { object_id: 'block-1', key: 'due_date', value_type: 'date', value_date: '2026-07-10T09:00' }],
-        ['labels', { object_id: 'block-1', key: 'labels', value_type: 'text', value_text: JSON.stringify(['time-block', 'duration:30m']) }],
+        ['tags', { object_id: 'block-1', key: 'tags', value_type: 'text', value_text: 'time-block,duration:30m' }],
         ['description', { object_id: 'block-1', key: 'description', value_type: 'text', value_text: 'Duration: 30 minutes' }],
       ]),
     )
