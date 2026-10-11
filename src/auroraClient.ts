@@ -13,6 +13,13 @@ import type {
   ObjectTypeSchema,
   PropertyValueType,
 } from './customDatabases.js'
+import {
+  isEncryptedMetadataValue,
+  resolveWorkspaceTaskStatuses,
+  TASK_STATUS_CONFIG_PROPERTY_KEY,
+  workspaceConfigObjectId,
+  type WorkspaceTaskStatuses,
+} from './taskStatuses.js'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1014,25 +1021,138 @@ export async function listMembers(workspaceId: string): Promise<AuroraWorkspaceM
 
 // ── Task lists & statuses ────────────────────────────────────────────────────
 
-export async function listTaskLists(workspaceId: string): Promise<AuroraTaskList[]> {
-  const client = getAuroraClient()
-  const records = await client.collection('task_lists').listPage({
-    filter: client.filter('workspace_id = {:wid}', { wid: workspaceId }),
-    sort: 'position',
-    page: 1,
-    perPage: 50,
-  })
-  return records.items.map((r) => ({
-    id: r['id'] as string,
-    name: r['name'] as string,
-    default_status: (r['default_status'] as string | null) ?? null,
-  }))
+/**
+ * Task lists are hidden `task_list` objects since auroradocs #1227 (#1137): the
+ * list name is the object title and the list's stable id sits in its `list_id`
+ * property; tasks point at that id through `task_list_id`. The legacy
+ * `task_lists` table is frozen (writes answer 410) and stays readable for one
+ * release only, so lists that no device has converted yet are still read from
+ * it and merged in by list id; the object always wins.
+ */
+export type TaskListsSnapshot = {
+  lists: AuroraTaskList[]
+  /** Lists whose name or id is end-to-end encrypted and cannot be read by this server. */
+  encryptedCount: number
 }
 
-export async function listTaskStatuses(): Promise<string[]> {
-  // Task statuses are defined in the schema, not per-workspace.
-  // Returns the standard set; custom workspace statuses may not appear.
-  return ['Backlog', 'To Do', 'In Progress', 'In Review', 'Done', 'Cancelled']
+const TASK_LIST_OBJECT_TYPE = 'task_list'
+const TASK_LIST_PAGE_LIMIT = 20
+
+export async function readTaskLists(workspaceId: string): Promise<TaskListsSnapshot> {
+  const client = getAuroraClient()
+  const filter = client.filter('workspace_id = {:wid} && type = {:type} && is_template = false', {
+    wid: workspaceId,
+    type: TASK_LIST_OBJECT_TYPE,
+  })
+  const objects: AuroraObjectRecord[] = []
+  for (let page = 1; page <= TASK_LIST_PAGE_LIMIT; page += 1) {
+    const result = await client.collection('objects').listPage({ filter, sort: 'created_at', page, perPage: 50 })
+    const mapped = result.items.map(mapObject)
+    if (mapped.some((object) => object.workspace_id !== workspaceId)) throw new Error('Task list lookup returned a foreign workspace record')
+    objects.push(...mapped.filter((object) => object.type === TASK_LIST_OBJECT_TYPE))
+    if (!result.totalPages || page >= result.totalPages) break
+  }
+  const props = await listProperties(objects.map((object) => object.id), workspaceId, { maxPages: 100 })
+  const propsByObject = new Map<string, AuroraPropertyRecord[]>()
+  for (const prop of props) {
+    const list = propsByObject.get(prop.object_id) ?? []
+    list.push(prop)
+    propsByObject.set(prop.object_id, list)
+  }
+
+  let encryptedCount = 0
+  const knownListIds = new Set<string>()
+  const live: Array<{ list: AuroraTaskList; position: number; createdAt: string }> = []
+  for (const object of objects) {
+    const byKey = new Map((propsByObject.get(object.id) ?? []).map((prop) => [prop.key, prop]))
+    const listIdProp = byKey.get('list_id')
+    const listId = listIdProp?.value_text ?? null
+    if (isEncryptedMetadataValue(listId) || isEncryptedMetadataValue(object.title)) {
+      if (!object.is_deleted) encryptedCount += 1
+      if (listId && !isEncryptedMetadataValue(listId)) knownListIds.add(listId)
+      continue
+    }
+    // An object whose list id has not arrived yet cannot be matched to its tasks.
+    if (!listId) continue
+    knownListIds.add(listId)
+    // Deleted on some device: the delete wins, and hides the legacy row too.
+    if (object.is_deleted) continue
+    const defaultStatus = byKey.get('default_status')?.value_text ?? null
+    const position = byKey.get('position')?.value_num
+    live.push({
+      list: {
+        id: listId,
+        name: object.title ?? '',
+        default_status: defaultStatus && !isEncryptedMetadataValue(defaultStatus) ? defaultStatus : null,
+      },
+      position: typeof position === 'number' ? position : Number.MAX_SAFE_INTEGER,
+      createdAt: object.created_at ?? '',
+    })
+  }
+  live.sort((a, b) => a.position - b.position || a.createdAt.localeCompare(b.createdAt))
+
+  const lists = live.map((entry) => entry.list)
+  for (const legacy of await readLegacyTaskLists(workspaceId)) {
+    if (knownListIds.has(legacy.id)) continue
+    if (isEncryptedMetadataValue(legacy.name)) {
+      encryptedCount += 1
+      continue
+    }
+    lists.push(legacy)
+  }
+  return { lists, encryptedCount }
+}
+
+async function readLegacyTaskLists(workspaceId: string): Promise<AuroraTaskList[]> {
+  const client = getAuroraClient()
+  try {
+    const records = await client.collection('task_lists').listPage({
+      filter: client.filter('workspace_id = {:wid}', { wid: workspaceId }),
+      sort: 'position',
+      page: 1,
+      perPage: 50,
+    })
+    return records.items.map((r) => ({
+      id: r['id'] as string,
+      name: (r['name'] as string | null) ?? '',
+      default_status: (r['default_status'] as string | null) ?? null,
+    }))
+  } catch (error) {
+    // The legacy table is retired: once AuroraCloud drops it, only objects remain.
+    if (error instanceof AuroraApiError && (error.status === 404 || error.status === 410)) return []
+    throw error
+  }
+}
+
+export async function listTaskLists(workspaceId: string): Promise<AuroraTaskList[]> {
+  return (await readTaskLists(workspaceId)).lists
+}
+
+/**
+ * The workspace's task statuses from the synced config on its hidden
+ * `workspace_config` object, falling back to Aurora's built-ins when there is
+ * none, when it is end-to-end encrypted, or when a newer format wrote it.
+ */
+export async function readWorkspaceTaskStatuses(workspaceId: string): Promise<WorkspaceTaskStatuses> {
+  const client = getAuroraClient()
+  const records = await client.collection('object_properties').listPage({
+    filter: client.filter('object_id = {:oid} && key = {:key} && workspace_id = {:wid}', {
+      oid: workspaceConfigObjectId(workspaceId),
+      key: TASK_STATUS_CONFIG_PROPERTY_KEY,
+      wid: workspaceId,
+    }),
+    page: 1,
+    perPage: 1,
+  })
+  const record = records.items[0]
+  if (record && record['workspace_id'] !== undefined && record['workspace_id'] !== workspaceId) {
+    throw new Error('Task status lookup returned a foreign workspace record')
+  }
+  return resolveWorkspaceTaskStatuses(typeof record?.['value_text'] === 'string' ? record['value_text'] : null)
+}
+
+export async function listTaskStatuses(workspaceId: string): Promise<string[]> {
+  return (await readWorkspaceTaskStatuses(workspaceId)).statuses.map((status) => status.id)
 }
 
 // ── Task properties ──────────────────────────────────────────────────────────
@@ -1066,7 +1186,7 @@ function propsToTaskProps(props: AuroraPropertyRecord[], objectId: string): Auro
     })(),
     labels: parseTaskListProperty(get('tags')?.value_text, get('labels')?.value_text),
     description: get('description')?.value_text ?? null,
-    task_list_id: get('task_list_id')?.value_ref ?? get('task_list_id')?.value_text ?? null,
+    task_list_id: get('task_list_id')?.value_text ?? get('task_list_id')?.value_ref ?? null,
   }
 }
 
@@ -1108,7 +1228,8 @@ export async function updateTaskProps(
   if (patch.priority !== undefined) triples.push({ key: 'priority', valueType: 'text', value: patch.priority })
   if (patch.due_date !== undefined) triples.push({ key: 'due_date', valueType: 'date', value: patch.due_date })
   if (patch.description !== undefined) triples.push({ key: 'description', valueType: 'text', value: patch.description })
-  if (patch.task_list_id !== undefined) triples.push({ key: 'task_list_id', valueType: 'ref', value: patch.task_list_id })
+  // Aurora stores the list id as text (auroradocs tasks.ts); a ref would not be read back by the app.
+  if (patch.task_list_id !== undefined) triples.push({ key: 'task_list_id', valueType: 'text', value: patch.task_list_id })
   if (patch.assignees !== undefined) triples.push({ key: 'assignees', valueType: 'text', value: JSON.stringify(patch.assignees) })
   if (patch.labels !== undefined) triples.push({ key: 'labels', valueType: 'text', value: JSON.stringify(patch.labels) })
 
@@ -1146,7 +1267,17 @@ export async function updateTaskProps(
           value_ref: null,
         })
       } else {
-        await client.collection('object_properties').update(existingId, { value_type: valueType, [valueField]: value })
+        // Every value column is reset, so a value stored under another type
+        // (an older MCP wrote task_list_id as a ref) cannot shadow the new one.
+        await client.collection('object_properties').update(existingId, {
+          value_type: valueType,
+          value_text: null,
+          value_num: null,
+          value_date: null,
+          value_bool: null,
+          value_ref: null,
+          [valueField]: value,
+        })
       }
     } else if (!isClearing) {
       await client.collection('object_properties').create({ object_id: objectId, key, value_type: valueType, [valueField]: value })

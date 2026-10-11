@@ -13,8 +13,8 @@ import {
   appendContentText,
   listProperties,
   listMembers,
-  listTaskLists,
-  listTaskStatuses,
+  readTaskLists,
+  readWorkspaceTaskStatuses,
   createObject,
   updateObjectTitle,
   deleteObject,
@@ -46,6 +46,14 @@ import type {
   WorkspaceKnowledgeSource,
 } from './auroraClient.js'
 import { buildWeekPlan, normalizeCanvasContent } from './planningTools.js'
+import {
+  isCompletedTaskStatus,
+  matchTaskStatus,
+  type TaskStatusGroup,
+  type TaskStatusSource,
+  type WorkspaceTaskStatuses,
+} from './taskStatuses.js'
+import { advanceRecurrenceChain } from './taskRecurrence.js'
 import type { McpCanvasReadResult, McpWeekPlan } from './planningTools.js'
 import { getMcpToolCoverageAudit, getMcpWorkflowRecipes } from './toolCatalog.js'
 import type { McpToolCoverageAudit, McpWorkflowRecipe } from './toolCatalog.js'
@@ -122,7 +130,15 @@ export type ToolResult =
     }
   | { type: 'created'; id: string; title: string }
   | { type: 'task_created'; id: string; title: string; status: string | null; task_list_name: string | null }
-  | { type: 'task_updated'; id: string; title: string; changed_fields: string[] }
+  | {
+      type: 'task_updated'
+      id: string
+      title: string
+      changed_fields: string[]
+      /** The next occurrence of a recurring task this completion created or found. */
+      next_occurrence?: { id: string; due_date: string; created: boolean }
+      note?: string
+    }
   | { type: 'object_updated'; id: string; changed_fields: string[] }
   | { type: 'updated'; id: string; title: string }
   | { type: 'deleted'; id: string }
@@ -150,8 +166,14 @@ export type ToolResult =
   | { type: 'canvas'; canvas: McpCanvasReadResult }
   | { type: 'scheduled_task_block'; id: string; title: string | null; due_date: string; mode: string }
   | { type: 'members'; members: { id: string; name: string | null; email: string; role: string }[] }
-  | { type: 'task_lists'; task_lists: { id: string; name: string }[] }
-  | { type: 'task_statuses'; statuses: string[] }
+  | { type: 'task_lists'; task_lists: { id: string; name: string }[]; encrypted_lists?: number; note?: string }
+  | {
+      type: 'task_statuses'
+      statuses: string[]
+      status_definitions: { id: string; group: TaskStatusGroup }[]
+      source: TaskStatusSource
+      note?: string
+    }
   | ({ type: 'project_context' } & ProjectContextResult)
   | ({ type: 'project_changes' } & ProjectChangesResult)
   | { type: 'no_op'; message: string }
@@ -719,13 +741,29 @@ async function executeToolCallUnsafe(
       }
 
       case 'list_task_lists': {
-        const lists = await listTaskLists(workspaceId)
-        return { type: 'task_lists', task_lists: lists.map((l) => ({ id: l.id, name: l.name })) }
+        const snapshot = await readTaskLists(workspaceId)
+        return {
+          type: 'task_lists',
+          task_lists: snapshot.lists.map((l) => ({ id: l.id, name: l.name })),
+          ...(snapshot.encryptedCount > 0
+            ? {
+                encrypted_lists: snapshot.encryptedCount,
+                note: `${snapshot.encryptedCount} task list(s) in this workspace are end-to-end encrypted. Their names cannot be read by the MCP server; open Aurora to see them.`,
+              }
+            : {}),
+        }
       }
 
       case 'list_task_statuses': {
-        const statuses = await listTaskStatuses()
-        return { type: 'task_statuses', statuses }
+        const statuses = await readWorkspaceTaskStatuses(workspaceId)
+        const note = TASK_STATUS_SOURCE_NOTES[statuses.source]
+        return {
+          type: 'task_statuses',
+          statuses: statuses.statuses.map((status) => status.id),
+          status_definitions: statuses.statuses.map((status) => ({ id: status.id, group: status.group })),
+          source: statuses.source,
+          ...(note ? { note } : {}),
+        }
       }
 
       case 'get_mcp_tool_coverage':
@@ -993,7 +1031,7 @@ async function executeToolCallUnsafe(
         const includeUnscheduled = input['include_unscheduled'] !== false
         const unscheduledLimit = readBoundedInteger(input, 'unscheduled_limit', { defaultValue: 12, min: 1, max: 50 })
         if (!unscheduledLimit.ok) return invalidInput(unscheduledLimit.message)
-        const tasks = await listPlanningTasks(workspaceId)
+        const [tasks, statuses] = await Promise.all([listPlanningTasks(workspaceId), readWorkspaceTaskStatuses(workspaceId)])
         return {
           type: 'week_plan',
           plan: buildWeekPlan(tasks.map((task) => ({
@@ -1007,6 +1045,7 @@ async function executeToolCallUnsafe(
             anchorDate,
             includeUnscheduled,
             unscheduledLimit: unscheduledLimit.value,
+            isDone: (status) => isCompletedTaskStatus(status, statuses.judged),
           }),
         }
       }
@@ -1051,7 +1090,8 @@ async function executeToolCallUnsafe(
           if (object.type !== 'task') return invalidInput(`${taskId} is not a task`)
 
           const props = await getTaskProps(taskId, workspaceId)
-          if (props.status === 'Done') return invalidInput('Completed tasks cannot be scheduled')
+          const statuses = await readWorkspaceTaskStatuses(workspaceId)
+          if (isCompletedTaskStatus(props.status, statuses.judged)) return invalidInput('Completed tasks cannot be scheduled')
 
           const dueDate = startTime ? `${date}T${startTime}` : weekPlanningDueDateForDay(date, props.due_date)
           await updateTaskProps(taskId, workspaceId, { due_date: dueDate })
@@ -1098,17 +1138,15 @@ async function executeToolCallUnsafe(
         const title = readString(input['title'])
         if (!title) return invalidInput('Task title is required')
 
+        // Resolve task fields before creating, so a bad status or list creates nothing.
+        const resolved = await resolveTaskInput(input, workspaceId)
+        const patch = resolved.patch
         const obj = await createObject(workspaceId, 'task', title)
-
-        // Resolve task fields
-        const patch = await resolveTaskInput(input, workspaceId)
         if (Object.keys(patch).length > 0) {
           await updateTaskProps(obj.id, workspaceId, patch)
         }
 
-        const taskListName = patch.task_list_id
-          ? (await listTaskLists(workspaceId)).find((l) => l.id === patch.task_list_id)?.name ?? null
-          : null
+        const taskListName = resolved.taskList?.name ?? null
 
         return { type: 'task_created', id: obj.id, title, status: patch.status ?? null, task_list_name: taskListName }
       }
@@ -1122,6 +1160,9 @@ async function executeToolCallUnsafe(
         if (obj.type !== 'task') return invalidInput(`${id} is not a task`)
 
         const changedFields: string[] = []
+        // Resolved first, so an unknown status or list changes nothing.
+        const resolved = await resolveTaskInput(input, workspaceId)
+        const patch = resolved.patch
         if ('title' in input) {
           const newTitle = readString(input['title'])
           if (!newTitle) return invalidInput('Task title cannot be empty')
@@ -1129,7 +1170,6 @@ async function executeToolCallUnsafe(
           changedFields.push('title')
         }
 
-        const patch = await resolveTaskInput(input, workspaceId)
         if (Object.keys(patch).length > 0) {
           await updateTaskProps(id, workspaceId, patch)
           if (patch.status !== undefined) changedFields.push('status')
@@ -1139,6 +1179,32 @@ async function executeToolCallUnsafe(
           if (patch.labels !== undefined) changedFields.push('labels')
           if (patch.description !== undefined) changedFields.push('description')
           if (patch.task_list_id !== undefined) changedFields.push('task_list')
+        }
+
+        // Completing a recurring task creates its next occurrence, as the app does.
+        if (patch.status) {
+          const statuses = await resolved.statuses()
+          if (isCompletedTaskStatus(patch.status, statuses.judged)) {
+            const advance = await advanceRecurrenceChain(workspaceId, id, statuses.judged)
+            if (advance.kind === 'created' || advance.kind === 'existing') {
+              return {
+                type: 'task_updated',
+                id,
+                title: obj.title ?? id,
+                changed_fields: changedFields,
+                next_occurrence: { id: advance.occurrenceId, due_date: advance.dueDate, created: advance.kind === 'created' },
+              }
+            }
+            if (advance.kind === 'encrypted') {
+              return {
+                type: 'task_updated',
+                id,
+                title: obj.title ?? id,
+                changed_fields: changedFields,
+                note: 'This recurring task is end-to-end encrypted, so the MCP server could not create its next occurrence. Open Aurora to continue the series.',
+              }
+            }
+          }
         }
 
         return { type: 'task_updated', id, title: obj.title ?? id, changed_fields: changedFields }
@@ -1253,20 +1319,28 @@ async function executeToolCallUnsafe(
 
 // ── Task input resolution ────────────────────────────────────────────────────
 
+type ResolvedTaskInput = {
+  patch: Partial<AuroraTaskProps>
+  taskList: AuroraTaskList | null
+  /** The workspace's statuses, read once and only when needed. */
+  statuses: () => Promise<WorkspaceTaskStatuses>
+}
+
 async function resolveTaskInput(
   input: Record<string, unknown>,
   workspaceId: string,
-): Promise<Partial<AuroraTaskProps>> {
+): Promise<ResolvedTaskInput> {
   const patch: Partial<AuroraTaskProps> = {}
+  let statusesPromise: Promise<WorkspaceTaskStatuses> | null = null
+  const statuses = () => (statusesPromise ??= readWorkspaceTaskStatuses(workspaceId))
+  let taskList: AuroraTaskList | null = null
 
   if ('status' in input) {
     const raw = readString(input['status'])
     if (raw === null) {
       patch.status = null
     } else {
-      const statuses = await listTaskStatuses()
-      const match = statuses.find((s) => s.toLowerCase() === raw.toLowerCase())
-      patch.status = match ?? raw
+      patch.status = resolveStatus(raw, await statuses())
     }
   }
 
@@ -1299,13 +1373,19 @@ async function resolveTaskInput(
     if (query === null) {
       patch.task_list_id = null
     } else {
-      const lists = await listTaskLists(workspaceId)
-      const match = matchTaskList(query, lists)
-      if (!match) throw new ToolInputError(`Could not resolve task list: ${query}`)
+      const snapshot = await readTaskLists(workspaceId)
+      const match = matchTaskList(query, snapshot.lists)
+      if (!match) {
+        throw new ToolInputError(snapshot.encryptedCount > 0
+          ? `Could not resolve task list: ${query}. ${snapshot.encryptedCount} task list(s) in this workspace are end-to-end encrypted and cannot be matched by the MCP server.`
+          : `Could not resolve task list: ${query}`)
+      }
       patch.task_list_id = match.id
-      // Apply default status if not explicitly set
+      taskList = match
+      // Apply the list's default status if none was given and the workspace still has it.
       if (patch.status === undefined && match.default_status) {
-        patch.status = match.default_status
+        const known = matchTaskStatus(match.default_status, (await statuses()).statuses)
+        if (known) patch.status = known
       }
     }
   }
@@ -1325,7 +1405,22 @@ async function resolveTaskInput(
     }
   }
 
-  return patch
+  return { patch, taskList, statuses }
+}
+
+const TASK_STATUS_SOURCE_NOTES: Record<TaskStatusSource, string | null> = {
+  workspace: null,
+  builtin: null,
+  encrypted: "This workspace's task statuses are end-to-end encrypted, so Aurora's built-in statuses are shown. The workspace may use others.",
+  unsupported: "This workspace's task statuses were saved by a newer Aurora version, so Aurora's built-in statuses are shown. Update the Aurora MCP server.",
+}
+
+function resolveStatus(raw: string, statuses: WorkspaceTaskStatuses): string {
+  const match = matchTaskStatus(raw, statuses.statuses)
+  if (match) return match
+  // Statuses this server cannot read (encrypted or newer format) may still exist: pass the value through.
+  if (statuses.source === 'encrypted' || statuses.source === 'unsupported') return raw
+  throw new ToolInputError(`Unknown task status: ${raw}. Use one of: ${statuses.statuses.map((status) => status.id).join(', ')}`)
 }
 
 // ── Content helpers ──────────────────────────────────────────────────────────
@@ -1379,8 +1474,14 @@ export function formatToolResult(result: ToolResult): string {
       return `Created: "${result.title}" (${result.id})`
     case 'task_created':
       return `Task created: "${result.title}" (${result.id})${result.status ? ` [${result.status}]` : ''}${result.task_list_name ? ` in ${result.task_list_name}` : ''}`
-    case 'task_updated':
-      return `Task updated: "${result.title}" (${result.id}) — changed: ${result.changed_fields.join(', ') || 'nothing'}`
+    case 'task_updated': {
+      const lines = [`Task updated: "${result.title}" (${result.id}) — changed: ${result.changed_fields.join(', ') || 'nothing'}`]
+      if (result.next_occurrence) {
+        lines.push(`Next occurrence ${result.next_occurrence.created ? 'created' : 'already exists'}: ${result.next_occurrence.id} due ${result.next_occurrence.due_date}`)
+      }
+      if (result.note) lines.push(`Note: ${result.note}`)
+      return lines.join('\n')
+    }
     case 'object_updated':
       return `Object updated: ${result.id} — changed: ${result.changed_fields.join(', ') || 'nothing'}`
     case 'updated':
@@ -1520,11 +1621,16 @@ export function formatToolResult(result: ToolResult): string {
     case 'members':
       if (!result.members.length) return 'No members found.'
       return result.members.map((m) => `- ${m.name ?? m.email} (${m.role}, ${m.id})`).join('\n')
-    case 'task_lists':
-      if (!result.task_lists.length) return 'No task lists found.'
-      return result.task_lists.map((l) => `- ${l.name} (${l.id})`).join('\n')
-    case 'task_statuses':
-      return result.statuses.join(', ')
+    case 'task_lists': {
+      const lines = result.task_lists.map((l) => `- ${l.name} (${l.id})`)
+      if (!lines.length) lines.push('No readable task lists found.')
+      if (result.note) lines.push(`Note: ${result.note}`)
+      return lines.join('\n')
+    }
+    case 'task_statuses': {
+      const text = result.status_definitions.map((status) => `${status.id} (${status.group})`).join(', ')
+      return result.note ? `${text}\nNote: ${result.note}` : text
+    }
     case 'restored':
       return result.changed
         ? `Restored object ${result.id} from trash.`

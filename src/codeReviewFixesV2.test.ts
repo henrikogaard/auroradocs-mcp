@@ -372,7 +372,7 @@ test('updateTaskProps pages through existing properties before creating a duplic
   }, async () => {
     await updateTaskProps('task-1', 'workspace-1', { status: 'Done' }, { existingObject: TASK_RECORD })
     assert.deepEqual(writes, [{
-      method: 'PATCH', id: 'prop-status', body: { value_type: 'text', value_text: 'Done' },
+      method: 'PATCH', id: 'prop-status', body: { value_type: 'text', value_text: 'Done', value_num: null, value_date: null, value_bool: null, value_ref: null },
     }])
   })
 })
@@ -406,7 +406,7 @@ test('updateTaskProps clears legacy value_text fallbacks for typed task fields',
     const emptyFields = { value_text: null, value_num: null, value_date: null, value_bool: null, value_ref: null }
     assert.deepEqual(patches, [
       { id: 'prop-due', body: { value_type: 'date', ...emptyFields } },
-      { id: 'prop-list', body: { value_type: 'ref', ...emptyFields } },
+      { id: 'prop-list', body: { value_type: 'text', ...emptyFields } },
     ])
   })
 })

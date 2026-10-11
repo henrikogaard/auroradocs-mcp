@@ -70,8 +70,8 @@ including object lookup and startup membership verification.
 | `wiki_recent` | List recently updated readable sources. | `read:objects` |
 | `get_object` | Return one object's metadata, stored properties, readable content, and explicit unavailable states for computed fields that require trusted local evaluation. | `read:objects`, `read:content` |
 | `list_workspace_members` | List members and roles in the token workspace. | `read:objects` |
-| `list_task_lists` | List task lists. | `read:objects`, `read:tasks` |
-| `list_task_statuses` | Return supported task status names. | `read:objects`, `read:tasks` |
+| `list_task_lists` | List task lists (Aurora's `task_list` objects, plus lists not yet converted from the legacy table). End-to-end encrypted list names are counted, not shown. | `read:objects`, `read:tasks` |
+| `list_task_statuses` | Return the workspace's task statuses with their group (`todo`, `inProgress`, `done`), or Aurora's built-ins when the workspace's own cannot be read. | `read:objects`, `read:tasks` |
 | `get_mcp_tool_coverage` | Describe implemented tool coverage and known gaps. | `read:objects` startup baseline |
 | `get_mcp_workflow_recipes` | Return built-in workflow recipes and their scopes. | `read:objects` startup baseline |
 | `list_object_types` | List custom object types and bounded schemas. | `read:objects` |
@@ -93,7 +93,7 @@ including object lookup and startup membership verification.
 | `schedule_task_block` | Schedule a task or create a task-backed time block. | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
 | `create_object` | Create a non-task object. | `read:objects`, `write:objects` |
 | `create_task` | Create a task and its task properties. | `read:objects`, `write:tasks`, `write:objects` |
-| `update_task` | Update fields on an existing task. | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
+| `update_task` | Update fields on an existing task. Completing a recurring task creates its next occurrence, as Aurora does. | `read:objects`, `read:tasks`, `write:tasks`, `write:objects` |
 | `update_object_title` | Rename an object. | `read:objects`, `write:objects` |
 | `update_object` | Rename an object and/or replace its plain-text content. | `read:objects`, `write:objects`; also `read:content`, `write:content` when replacing content |
 | `set_content` | Replace an object's content with plain text. | `read:objects`, `read:content`, `write:content` |

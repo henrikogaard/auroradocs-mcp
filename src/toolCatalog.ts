@@ -669,8 +669,23 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
         additionalProperties: false,
       },
     },
+    encrypted_lists: { type: 'integer', minimum: 1 },
+    note: stringSchema,
   }, ['task_lists'])],
-  list_task_statuses: [resultSchema('task_statuses', { statuses: { type: 'array', items: stringSchema } }, ['statuses'])],
+  list_task_statuses: [resultSchema('task_statuses', {
+    statuses: { type: 'array', items: stringSchema },
+    status_definitions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { id: stringSchema, group: { type: 'string', enum: ['todo', 'inProgress', 'done'] } },
+        required: ['id', 'group'],
+        additionalProperties: false,
+      },
+    },
+    source: { type: 'string', enum: ['workspace', 'builtin', 'encrypted', 'unsupported'] },
+    note: stringSchema,
+  }, ['statuses', 'status_definitions', 'source'])],
   list_week_plan: [resultSchema('week_plan', { plan: WEEK_PLAN_SCHEMA }, ['plan'])],
   schedule_task_block: [resultSchema('scheduled_task_block', {
     id: stringSchema,
@@ -755,6 +770,13 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
     id: stringSchema,
     title: stringSchema,
     changed_fields: { type: 'array', items: stringSchema },
+    next_occurrence: {
+      type: 'object',
+      properties: { id: stringSchema, due_date: stringSchema, created: { type: 'boolean' } },
+      required: ['id', 'due_date', 'created'],
+      additionalProperties: false,
+    },
+    note: stringSchema,
   }, ['id', 'title', 'changed_fields'])],
   update_object_title: [resultSchema('updated', { id: stringSchema, title: stringSchema }, ['id', 'title'])],
   update_object: [
@@ -773,7 +795,7 @@ const RESULT_SCHEMAS: Readonly<Record<string, JsonObjectSchema[]>> = {
 }
 
 const NON_IDEMPOTENT_TOOLS = new Set(['schedule_task_block', 'create_object', 'create_task', 'append_block', 'create_template', 'create_from_template', 'import_obsidian_vault'])
-const LOCAL_TOOLS = new Set(['list_workspaces', 'list_task_statuses', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'])
+const LOCAL_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes', 'analyze_obsidian_vault', 'get_obsidian_import_plan', 'import_obsidian_vault', 'get_obsidian_import_status'])
 const WORKSPACE_SELECTOR_FREE_TOOLS = new Set(['list_workspaces', 'get_mcp_tool_coverage', 'get_mcp_workflow_recipes', 'get_custom_database_recipes'])
 
 type McpToolDeclaration = Omit<McpToolDefinition, 'title' | 'outputSchema' | 'annotations'>
@@ -896,12 +918,12 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
   },
   {
     name: 'list_task_lists',
-    description: 'List available task lists in the workspace.',
+    description: 'List the task lists in the workspace (id and name). Lists whose names are end-to-end encrypted are counted but cannot be named.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'list_task_statuses',
-    description: 'List the task statuses available in the workspace.',
+    description: "List the workspace's task statuses in board order, each with its group (todo, inProgress or done). A task is complete when its status is in the done group. Falls back to Aurora's built-ins (Backlog, Todo, In Progress, Done) when the workspace's own statuses cannot be read.",
     inputSchema: { type: 'object', properties: {} },
   },
   {
@@ -1168,7 +1190,7 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
       type: 'object',
       properties: {
         title: { type: 'string', description: 'Task title' },
-        status: { type: 'string', description: 'Task status (e.g. To Do, In Progress, Done)' },
+        status: { type: 'string', description: 'Task status from list_task_statuses (e.g. Todo, In Progress, Done). Unknown statuses are rejected.' },
         priority: { type: 'string', description: 'Priority: Low, Medium, High, or Urgent' },
         due_date: { type: 'string', description: 'Due date in ISO 8601 (e.g. 2026-04-15 or 2026-04-15T22:00)' },
         assignees: { oneOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }], description: 'Assignee names, emails, or user IDs (array or comma-separated)' },
@@ -1181,13 +1203,13 @@ const TOOL_DEFINITIONS: McpToolDeclaration[] = [
   },
   {
     name: 'update_task',
-    description: 'Update an existing task. Only provided fields are changed. Empty strings/arrays clear optional fields.',
+    description: 'Update an existing task. Only provided fields are changed. Empty strings/arrays clear optional fields. Completing a recurring task creates its next occurrence and reports it in next_occurrence.',
     inputSchema: {
       type: 'object',
       properties: {
         id: { type: 'string', description: 'The task object ID' },
         title: { type: 'string', description: 'New task title' },
-        status: { type: 'string', description: 'Task status' },
+        status: { type: 'string', description: 'Task status from list_task_statuses. Moving a recurring task into a done status creates its next occurrence, as Aurora does.' },
         priority: { type: 'string', description: 'Priority: Low, Medium, High, Urgent, or empty to clear' },
         due_date: { type: 'string', description: 'Due date (ISO 8601) or empty to clear' },
         assignees: { oneOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }], description: 'Assignees (names/emails/IDs) or empty to clear' },

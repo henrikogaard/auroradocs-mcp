@@ -11,6 +11,8 @@ export type BuildWeekPlanInput = {
   anchorDate: string
   includeUnscheduled: boolean
   unscheduledLimit: number
+  /** Whether a status is in the workspace's done group. Defaults to Aurora's built-ins (`Done`). */
+  isDone?: (status: string | null) => boolean
 }
 
 export type McpWeekPlanTask = McpPlanningTask & {
@@ -71,7 +73,8 @@ export type McpCanvasReadResult = {
 
 export function buildWeekPlan(tasks: McpPlanningTask[], input: BuildWeekPlanInput): McpWeekPlan {
   const days = getWeekPlanningDays(input.anchorDate)
-  const buckets = getWeekPlanningTaskBuckets(tasks, days)
+  const isDone = input.isDone ?? isLegacyDoneStatus
+  const buckets = getWeekPlanningTaskBuckets(tasks, days, isDone)
 
   return {
     type: 'week_plan',
@@ -81,7 +84,7 @@ export function buildWeekPlan(tasks: McpPlanningTask[], input: BuildWeekPlanInpu
       tasks: (buckets[date] ?? []).map(toWeekPlanTask),
     })),
     unscheduled: input.includeUnscheduled
-      ? getUnscheduledWeekPlanningTasks(tasks).slice(0, clampLimit(input.unscheduledLimit)).map(toWeekPlanTask)
+      ? getUnscheduledWeekPlanningTasks(tasks, isDone).slice(0, clampLimit(input.unscheduledLimit)).map(toWeekPlanTask)
       : [],
   }
 }
@@ -167,12 +170,13 @@ function getWeekPlanningStart(anchorDateKey: string): string {
 function getWeekPlanningTaskBuckets<T extends McpPlanningTask>(
   tasks: T[],
   days: string[],
+  isDone: (status: string | null) => boolean,
 ): Record<string, T[]> {
   const daySet = new Set(days)
   const buckets = Object.fromEntries(days.map((day) => [day, [] as T[]])) as Record<string, T[]>
 
   for (const task of tasks) {
-    if (isDoneTask(task)) continue
+    if (isDone(task.status)) continue
     const day = task.due_date?.slice(0, 10)
     if (!day || !daySet.has(day)) continue
     buckets[day].push(task)
@@ -185,9 +189,9 @@ function getWeekPlanningTaskBuckets<T extends McpPlanningTask>(
   return buckets
 }
 
-function getUnscheduledWeekPlanningTasks<T extends McpPlanningTask>(tasks: T[]): T[] {
+function getUnscheduledWeekPlanningTasks<T extends McpPlanningTask>(tasks: T[], isDone: (status: string | null) => boolean): T[] {
   return tasks
-    .filter((task) => !isDoneTask(task) && !task.due_date)
+    .filter((task) => !isDone(task.status) && !task.due_date)
     .sort(compareWeekPlanningTasks)
 }
 
@@ -237,8 +241,8 @@ function formatDateKey(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
-function isDoneTask(task: McpPlanningTask): boolean {
-  return task.status === 'Done'
+function isLegacyDoneStatus(status: string | null): boolean {
+  return status === 'Done'
 }
 
 function compareWeekPlanningTasks(a: McpPlanningTask, b: McpPlanningTask): number {
