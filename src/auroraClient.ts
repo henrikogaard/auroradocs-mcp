@@ -1475,21 +1475,6 @@ function createAuroraCloudClient(baseUrl: string): BackendClient {
       return request<Record<string, unknown>>(`/api/collections/${name}/records/${encodeURIComponent(id)}`, { method: 'GET' })
     },
     async create(data: Record<string, unknown>) {
-      if (name === 'users') {
-        const result = await request<{ user: Record<string, unknown>; accessToken: string }>(
-          '/auth/register',
-          {
-            method: 'POST',
-            body: {
-              email: data['email'],
-              password: data['password'],
-              displayName: data['name'] ?? data['display_name'] ?? null,
-            },
-          },
-        )
-        authStore.save(result.accessToken, result.user)
-        return result.user
-      }
       return request<Record<string, unknown>>(`/api/collections/${name}/records`, { method: 'POST', body: data })
     },
     async update(id: string, data: Record<string, unknown>) {

@@ -30,7 +30,10 @@ logs, screenshots, issues, or support messages. Use the token fingerprint from
 | `400` | A required value or tool argument is invalid. | Check the workspace ID and the tool's required arguments. Do not retry unchanged input. |
 | `401` | The token is invalid, expired, revoked, or copied incorrectly. | Create a replacement token, update the client, verify it, and revoke any superseded token. |
 | `403` | Workspace, role, or scope enforcement denied the request. | Confirm the token belongs to this workspace. Review the denial in token activity. Mint a broader token only if the workflow truly needs that scope. |
+| `403` `email_verification_required` | The account that owns the token has not confirmed its email address. Every AuroraCloud credential is refused until it does. | Open the confirmation link Aurora emailed, or request a new one from the Aurora sign-in screen, then retry. No new token is needed. |
+| `403` `write_refused` | The credential can read the object but its role (viewer, or not an editor of a private teamspace) may not change it. | Ask a workspace owner for edit access. Retrying will not help. |
 | `404` | The workspace or record was not found or is not accessible to this credential. | Verify the workspace ID and object ID; do not assume a record exists in another workspace. |
+| `410` | The resource was retired by AuroraCloud (for example the old `task_lists` collection). | Update the Aurora MCP server to the latest version. Retrying will not help. |
 | `429` | The token exceeded a read or write rate limit. | Wait for the `retry-after` interval, reduce repeated calls, and retry once. |
 | `5xx` | AuroraCloud or a dependency failed. | Retry later. If it persists, report sanitized timing, status, package version, and token fingerprint only. |
 

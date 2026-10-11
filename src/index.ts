@@ -21,6 +21,7 @@
  */
 import { serveStdio } from '@modelcontextprotocol/server/stdio'
 import { authenticate } from './auroraClient.js'
+import { startupAuthFailureMessage } from './errors.js'
 import { createAuroraMcpServer } from './server.js'
 
 async function main() {
@@ -30,8 +31,8 @@ async function main() {
       token: process.env['AURORA_API_TOKEN'],
       workspaceId: process.env['AURORA_WORKSPACE_ID'],
     })
-  } catch {
-    process.stderr.write('Aurora MCP authentication failed.\n')
+  } catch (error) {
+    process.stderr.write(`${startupAuthFailureMessage(error)}\n`)
     process.exit(1)
   }
 

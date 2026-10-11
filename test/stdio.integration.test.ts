@@ -76,6 +76,28 @@ function runMcpProcess(env: Record<string, string>): Promise<{ exitCode: number 
   })
 }
 
+test('an unconfirmed email address is explained at startup without echoing the address', async () => {
+  const privateEmail = 'private-person@example.com'
+  const api = createServer((_request, response) => {
+    response.setHeader('content-type', 'application/json')
+    response.statusCode = 403
+    response.end(JSON.stringify({ error: 'Confirm your email address to use AuroraCloud.', code: 'email_verification_required', email: privateEmail }))
+  })
+  try {
+    const port = await listen(api)
+    const result = await runMcpProcess({
+      ...getDefaultEnvironment(),
+      AURORA_API_URL: `http://127.0.0.1:${port}`,
+      AURORA_API_TOKEN: 'aur_mcp_client_private_unverified',
+    })
+    assert.equal(result.exitCode, 1)
+    assert.match(result.stderr, /^Aurora MCP authentication failed\. Confirm your email address/)
+    assert.doesNotMatch(result.stderr, new RegExp(privateEmail))
+  } finally {
+    if (api.listening) await closeServer(api)
+  }
+})
+
 test('authentication failure diagnostics do not expose private startup context', async () => {
   const privateWorkspaceId = 'workspace-private-auth'
   const privateUserId = 'user-private-auth'
